@@ -1,0 +1,29 @@
+# ===== 密钥与本地配置（绝不提交）=====
+config.yaml
+
+# ===== 运行产物 / 日志 / 状态 =====
+*.log
+bot.pid
+bot_runtime.log
+workbench_state.json
+cache/
+.shots/
+
+# ===== Python =====
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ===== 本机专属工具（含本机绝对路径或一次性调试用，不通用）=====
+start_bot.bat
+probe_msg.py
+test_card.py
+preview_sheets.py
+*_check.js
+
+# ===== 编辑器 / 系统 =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

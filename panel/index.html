@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>文档审核机器人 · 控制台</title>
+<style>
+  /* ============ 设计令牌 ============ */
+  :root{
+    --bg:#0a0d13; --bg-soft:#0d1119;
+    --s1:#121825; --s2:#182034; --s3:#1f2a42;
+    --line:rgba(148,163,184,.13); --line-strong:rgba(148,163,184,.24);
+    --txt:#e8eef8; --sub:#93a3ba; --dim:#5f7089;
+    --brand:#4d8dff; --brand-2:#7aa7ff; --violet:#8b6cf6;
+    --green:#2fd58f; --green-2:#17b57a;
+    --red:#ff5d6c; --amber:#ffb454;
+    --grad:linear-gradient(135deg,#4d8dff 0%,#8b6cf6 100%);
+    --r:16px; --r-s:10px;
+    --shadow:0 14px 44px rgba(2,6,16,.55);
+    --mono:ui-monospace,"Cascadia Code",Consolas,"SF Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--txt);
+    font:14px/1.65 var(--sans);
+    -webkit-font-smoothing:antialiased;overflow-y:scroll}
+  /* 背景氛围光 */
+  body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:
+      radial-gradient(900px 420px at 12% -8%, rgba(77,141,255,.13), transparent 60%),
+      radial-gradient(760px 420px at 88% -4%, rgba(139,108,246,.10), transparent 60%),
+      radial-gradient(700px 520px at 50% 118%, rgba(47,213,143,.05), transparent 60%);
+  }
+  ::selection{background:rgba(77,141,255,.35)}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 22px 60px}
+
+  /* ============ 顶栏 ============ */
+  .top{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:40px;height:40px;border-radius:12px;background:var(--grad);
+    display:grid;place-items:center;color:#fff;box-shadow:0 6px 20px rgba(77,141,255,.4), inset 0 1px 0 rgba(255,255,255,.35)}
+  .logo svg{width:21px;height:21px}
+  .brand h1{font-size:16.5px;font-weight:700;letter-spacing:.2px;line-height:1.25}
+  .brand .sub{font-size:11.5px;color:var(--dim)}
+  .spacer{flex:1}
+  .pill{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:999px;
+    font-size:12px;font-weight:600;border:1px solid var(--line);background:rgba(18,24,37,.8);color:var(--sub);
+    backdrop-filter:blur(6px)}
+  .pill .pdot{width:7px;height:7px;border-radius:50%;background:var(--green);
+    box-shadow:0 0 0 0 rgba(47,213,143,.6);animation:pulse 2.2s infinite}
+  .pill.off .pdot{background:var(--dim);animation:none;box-shadow:none}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(47,213,143,.45)}70%{box-shadow:0 0 0 7px rgba(47,213,143,0)}100%{box-shadow:0 0 0 0 rgba(47,213,143,0)}}
+  #clock{font-family:var(--mono);font-size:12.5px;color:var(--dim);letter-spacing:.5px}
+
+  /* ============ Hero 状态区 ============ */
+  .hero{position:relative;border:1px solid var(--line);border-radius:20px;overflow:hidden;
+    background:linear-gradient(180deg,#151d2e 0%,#10151f 100%);box-shadow:var(--shadow);
+    display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:24px;align-items:center;
+    padding:22px 26px;margin-bottom:16px}
+  .hero::before{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(520px 200px at 0% 0%, rgba(77,141,255,.14), transparent 60%)}
+  .h-left{display:flex;flex-direction:column;gap:9px;min-width:250px}
+  .h-eyebrow{display:flex;align-items:center;gap:9px}
+  .state-badge{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--sub)}
+  .state-badge .dot{width:11px;height:11px;border-radius:50%}
+  .state-badge.on{color:#b8f5dd}.state-badge.on .dot{background:var(--green);box-shadow:0 0 0 4px rgba(47,213,143,.16),0 0 14px var(--green);animation:pulse 2.2s infinite}
+  .state-badge.off{color:#ffc9ce}.state-badge.off .dot{background:var(--red);box-shadow:0 0 0 4px rgba(255,93,108,.14)}
+  .state-badge.boot{color:var(--amber)}.state-badge.boot .dot{background:var(--amber);animation:blink 1s step-end infinite}
+  @keyframes blink{50%{opacity:.25}}
+  .h-status{font-size:27px;font-weight:800;letter-spacing:.5px;line-height:1.15}
+  .h-status .t-running{background:linear-gradient(90deg,#3ce8a6,#2fd58f);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .h-status .t-stopped{color:#ff8b95}
+  .h-meta{display:flex;flex-wrap:wrap;gap:7px}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:7px;
+    font-size:11.5px;font-weight:600;font-family:var(--mono);
+    background:rgba(148,163,184,.09);border:1px solid var(--line);color:var(--sub)}
+  .chip svg{width:12px;height:12px}
+  .chip.g{color:#a7f0d2;border-color:rgba(47,213,143,.25);background:rgba(47,213,143,.08)}
+  .vdiv{width:1px;align-self:stretch;background:var(--line)}
+  .h-info{display:grid;grid-template-columns:1fr 1fr;gap:6px 26px;align-content:center}
+  .kv{min-width:0}
+  .kv .k{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin-bottom:1px}
+  .kv .v{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:7px;min-width:0;white-space:nowrap}
+  .kv .v .mono{font-family:var(--mono);font-weight:500;color:var(--brand-2);overflow:hidden;text-overflow:ellipsis}
+  .kv .v .cpy{color:var(--dim);cursor:pointer;padding:2px;border-radius:5px;display:grid;place-items:center;flex:none;transition:.15s}
+  .kv .v .cpy:hover{color:var(--brand-2);background:rgba(77,141,255,.14)}
+  .kv .v .cpy svg{width:13px;height:13px}
+  .tag{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;letter-spacing:.3px;flex:none}
+  .tag.deep{color:#bda6ff;background:rgba(139,108,246,.16);border:1px solid rgba(139,108,246,.35)}
+  .tag.rule{color:#ffce8d;background:rgba(255,180,84,.12);border:1px solid rgba(255,180,84,.3)}
+  .h-actions{display:flex;flex-direction:column;gap:9px}
+  .h-actions .note{font-size:11px;color:var(--dim);text-align:center;min-height:14px}
+
+  /* ============ 按钮 ============ */
+  button{font-family:inherit;border:none;cursor:pointer;user-select:none;
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    border-radius:11px;font-size:13.5px;font-weight:700;letter-spacing:.2px;color:#fff;
+    padding:10px 18px;background:#253048;transition:transform .12s ease,box-shadow .2s,filter .2s,background .2s;
+    position:relative}
+  button svg{width:16px;height:16px}
+  button:hover{filter:brightness(1.14)}
+  button:active{transform:translateY(1px) scale(.985)}
+  button:focus-visible{outline:2px solid var(--brand-2);outline-offset:2px}
+  button:disabled{opacity:.4;cursor:not-allowed;filter:grayscale(.4);transform:none}
+  .btn-primary{background:var(--grad);box-shadow:0 6px 18px rgba(77,141,255,.3)}
+  .btn-primary:hover{box-shadow:0 8px 26px rgba(77,141,255,.45)}
+  .btn-ok{background:linear-gradient(135deg,#1fb37f,#17a06f);box-shadow:0 6px 18px rgba(47,213,143,.22)}
+  .btn-danger{background:linear-gradient(135deg,#ff5d6c,#e8455a);box-shadow:0 6px 18px rgba(255,93,108,.22)}
+  .btn-ghost{background:transparent;border:1px solid var(--line-strong);color:var(--txt)}
+  .btn-ghost:hover{background:rgba(148,163,184,.08);filter:none}
+  .btn-soft{background:rgba(148,163,184,.12);color:var(--sub)}
+  .btn-soft:hover{color:var(--txt);filter:none;background:rgba(148,163,184,.2)}
+  .btn-block{width:100%}
+  .btn-lg{padding:12px 20px;font-size:14.5px}
+  /* loading spinner */
+  .spin{width:15px;height:15px;border-radius:50%;border:2px solid rgba(255,255,255,.28);
+    border-top-color:#fff;animation:rot .8s linear infinite;display:inline-block;flex:none}
+  @keyframes rot{to{transform:rotate(360deg)}}
+  .btn-lite .spin{border-color:rgba(77,141,255,.3);border-top-color:var(--brand)}
+
+  /* ============ 卡片网格 ============ */
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}
+  .card{background:linear-gradient(180deg,var(--s1),#0f1520);border:1px solid var(--line);
+    border-radius:var(--r);padding:20px 20px 18px;transition:border-color .25s,transform .25s,box-shadow .25s}
+  .card:hover{border-color:var(--line-strong)}
+  .card.hl{border-color:rgba(77,141,255,.5);box-shadow:0 0 0 3px rgba(77,141,255,.14)}
+  .span-6{grid-column:span 6}.span-12{grid-column:span 12}
+  .c-head{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .c-ico{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:none;
+    background:rgba(77,141,255,.12);color:var(--brand-2);border:1px solid rgba(77,141,255,.18)}
+  .c-ico svg{width:16px;height:16px}
+  .c-ico.purple{background:rgba(139,108,246,.12);color:#bda6ff;border-color:rgba(139,108,246,.22)}
+  .c-ico.green{background:rgba(47,213,143,.1);color:#7fe8bc;border-color:rgba(47,213,143,.2)}
+  .c-ico.amber{background:rgba(255,180,84,.1);color:#ffce8d;border-color:rgba(255,180,84,.22)}
+  .c-title{font-size:14.5px;font-weight:700}
+  .c-sub{font-size:12px;color:var(--dim)}
+  .c-badge{margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;
+    padding:3px 9px;border-radius:999px}
+  .c-badge.g{color:#9fecc9;background:rgba(47,213,143,.1);border:1px solid rgba(47,213,143,.28)}
+  .c-badge.y{color:#ffce8d;background:rgba(255,180,84,.1);border:1px solid rgba(255,180,84,.28)}
+  .c-body{margin-top:13px}
+
+  /* ============ 表单 ============ */
+  .field{margin-bottom:12px}
+  .f-label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);margin-bottom:5px;font-weight:600}
+  .f-label svg{width:12.5px;height:12.5px;color:var(--dim)}
+  .input-wrap{position:relative;display:flex;align-items:center}
+  .inp{width:100%;background:rgba(8,12,20,.6);border:1px solid var(--line-strong);border-radius:var(--r-s);
+    color:var(--txt);padding:9px 12px;font-size:13.5px;outline:none;transition:border-color .18s,box-shadow .18s,background .18s;
+    font-family:var(--sans)}
+  .inp.mono{font-family:var(--mono);font-size:12.5px}
+  .inp::placeholder{color:#44546e}
+  .inp:hover{border-color:rgba(148,163,184,.4)}
+  .inp:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(77,141,255,.16);background:#0b1120}
+  .inp.err{border-color:var(--red);box-shadow:0 0 0 3px rgba(255,93,108,.14)}
+  .inp.ok{border-color:var(--green);box-shadow:0 0 0 3px rgba(47,213,143,.12)}
+  .eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:transparent;color:var(--dim);
+    padding:6px;border-radius:7px}
+  .eye:hover{background:rgba(148,163,184,.12);color:var(--txt);filter:none}
+  .eye svg{width:16px;height:16px;display:block}
+  .f-hint{font-size:11.5px;color:var(--dim);margin-top:4px;min-height:15px;line-height:1.5}
+  .f-hint.ok{color:#7fe8bc}.f-hint.err{color:#ff8b95}.f-hint.warn{color:#ffce8d}
+  /* token 实时解析条 */
+  .parse-bar{display:none;align-items:center;gap:8px;margin-top:9px;padding:8px 11px;border-radius:9px;
+    font-size:12px;font-family:var(--mono);background:rgba(47,213,143,.07);border:1px solid rgba(47,213,143,.25);color:#9fecc9}
+  .parse-bar.err{background:rgba(255,93,108,.07);border-color:rgba(255,93,108,.3);color:#ff9aa4}
+  .parse-bar svg{width:13px;height:13px;flex:none}
+  .cur-info{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);
+    background:rgba(148,163,184,.06);border:1px dashed var(--line);border-radius:9px;padding:7px 11px;margin-top:9px}
+  .cur-info b{font-family:var(--mono);font-weight:500;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* 开关 */
+  .switch-row{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);
+    border-radius:var(--r-s);background:rgba(148,163,184,.04);margin-top:6px}
+  .switch-row .tx{flex:1;font-size:12.5px;color:var(--sub)}
+  .switch{position:relative;width:38px;height:22px;flex:none;cursor:pointer}
+  .switch input{opacity:0;width:0;height:0}
+  .slider{position:absolute;inset:0;border-radius:999px;background:#2a3448;transition:.22s}
+  .slider::before{content:"";position:absolute;width:16px;height:16px;border-radius:50%;left:3px;top:3px;
+    background:#8fa0b5;transition:.22s}
+  .switch input:checked+.slider{background:rgba(255,93,108,.35)}
+  .switch input:checked+.slider::before{transform:translateX(16px);background:#ff8b95}
+  .switch input:focus-visible+.slider{outline:2px solid var(--brand-2);outline-offset:2px}
+
+  /* 工作表 chips */
+  .sheet-out{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+  .sheet-out:empty{display:none}
+  .s-chip{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:8px;font-size:12px;
+    background:rgba(148,163,184,.07);border:1px solid var(--line);color:var(--txt);transition:.18s}
+  .s-chip .sd{width:7px;height:7px;border-radius:50%;background:var(--green);flex:none}
+  .s-chip.off{opacity:.6}.s-chip.off .sd{background:var(--amber)}
+  .s-chip:hover{border-color:rgba(77,141,255,.45);transform:translateY(-1px)}
+  .s-chip .tag2{font-size:10px;color:var(--dim);font-family:var(--sans)}
+  .verdict{margin-top:11px;display:flex;align-items:center;gap:9px;font-size:13px;font-weight:600;min-height:20px}
+  .verdict .vi{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;flex:none}
+  .verdict .vi svg{width:11px;height:11px}
+  .verdict.ok .vi{background:rgba(47,213,143,.18);color:#7fe8bc}
+  .verdict.err .vi{background:rgba(255,93,108,.16);color:#ff8b95}
+  .verdict.run .vi{background:rgba(77,141,255,.16);color:var(--brand-2)}
+  .verdict .em{font-weight:400;color:var(--sub);font-size:12px;margin-left:4px}
+  .verdict .ms{font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+
+  /* 手风琴 */
+  details{border:1px solid var(--line);border-radius:var(--r-s);overflow:hidden;background:rgba(8,12,20,.35)}
+  summary{list-style:none;cursor:pointer;padding:11px 14px;display:flex;align-items:center;gap:9px;
+    font-size:13px;font-weight:600;color:var(--sub);transition:.18s;user-select:none}
+  summary::-webkit-details-marker{display:none}
+  summary:hover{color:var(--txt);background:rgba(148,163,184,.05)}
+  summary svg{width:14px;height:14px;color:var(--brand-2);transition:transform .22s}
+  details[open] summary .chev{transform:rotate(90deg)}
+  .acc-body{padding:6px 14px 12px;border-top:1px solid var(--line)}
+
+  /* 操作条（保存） */
+  .actionbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    border:1px solid rgba(77,141,255,.35);border-radius:var(--r);
+    background:linear-gradient(180deg,rgba(77,141,255,.10),rgba(77,141,255,.04));
+    padding:13px 18px;margin-top:16px}
+  .ab-tx{flex:1;min-width:220px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--sub)}
+  .ab-tx svg{width:17px;height:17px;color:var(--brand-2);flex:none}
+  .ab-tx b{color:var(--txt)}
+  .dirty-n{display:none;font-size:11px;font-weight:700;color:#0b1120;background:var(--amber);
+    border-radius:999px;padding:1px 8px;animation:blink 1.2s step-end infinite}
+  .ab-tx.dirty .dirty-n{display:inline-block}
+  .save-cta{animation:glowp 1.6s ease-in-out infinite}
+  @keyframes glowp{0%,100%{box-shadow:0 6px 18px rgba(77,141,255,.3)}50%{box-shadow:0 6px 30px rgba(77,141,255,.55)}}
+
+  /* ============ 日志 ============ */
+  .logcard{padding:0;overflow:hidden}
+  .log-head{display:flex;align-items:center;gap:8px;padding:15px 18px 0}
+  .log-head .c-ico{margin-right:2px}
+  .tabs{display:flex;gap:4px;margin-left:14px;background:rgba(8,12,20,.5);padding:4px;border-radius:10px;border:1px solid var(--line)}
+  .tab{padding:5px 14px;border-radius:7px;font-size:12.5px;color:var(--sub);background:transparent;font-weight:600}
+  .tab.act{background:var(--grad);color:#fff;box-shadow:0 2px 10px rgba(77,141,255,.35)}
+  .tab .cnt{font-family:var(--mono);font-size:10.5px;background:rgba(0,0,0,.28);padding:0 6px;border-radius:999px;margin-left:3px}
+  .log-tools{margin-left:auto;display:flex;align-items:center;gap:6px}
+  .icon-btn{background:transparent;color:var(--dim);padding:6px;border-radius:8px;border:1px solid transparent}
+  .icon-btn:hover{background:rgba(148,163,184,.1);color:var(--txt);filter:none}
+  .icon-btn svg{width:15px;height:15px;display:block}
+  .icon-btn.on{color:#7fe8bc;background:rgba(47,213,143,.08)}
+  .icon-btn.danger:hover{color:#ff8b95;background:rgba(255,93,108,.1)}
+  .log-body{position:relative;margin-top:13px;border-top:1px solid var(--line);background:#080c12;
+    height:340px;overflow-y:auto;padding:10px 4px}
+  .log-body::-webkit-scrollbar,.sheet-out::-webkit-scrollbar{width:8px;height:8px}
+  .log-body::-webkit-scrollbar-thumb{background:#26304a;border-radius:8px}
+  .log-body::-webkit-scrollbar-track{background:transparent}
+  .ln{display:flex;gap:10px;padding:1px 12px;font:12px/1.75 var(--mono);white-space:pre-wrap;word-break:break-all;
+    border-radius:5px;color:#9db1c8}
+  .ln:hover{background:rgba(148,163,184,.06)}
+  .ln .t{color:#3d4c63;flex:none}
+  .ln.ok{color:#8fe9c4}.ln.err{color:#ff9aa4}.ln.warn{color:#ffce8d}
+  .ln.sys{color:#7fb2ff}.ln.dim{color:#57677f}
+  .log-empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);font-size:13px;gap:0}
+  .badge-err{display:inline-block;font-size:10px;font-weight:700;color:#fff;background:var(--red);
+    border-radius:999px;padding:0 6px;line-height:15px;margin-left:4px;vertical-align:1px}
+
+  /* ============ Toast ============ */
+  #toasts{position:fixed;right:18px;bottom:18px;z-index:99;display:flex;flex-direction:column;gap:10px;max-width:400px}
+  .toast{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:12px;font-size:13px;line-height:1.5;
+    background:rgba(20,27,42,.96);border:1px solid var(--line-strong);box-shadow:0 10px 34px rgba(0,0,0,.5);
+    backdrop-filter:blur(10px);animation:tin .28s cubic-bezier(.2,.9,.3,1.2);overflow:hidden;position:relative}
+  .toast.out{animation:tout .25s forwards}
+  @keyframes tin{from{opacity:0;transform:translateY(14px) scale(.96)}to{opacity:1;transform:none}}
+  @keyframes tout{to{opacity:0;transform:translateX(30px)}}
+  .toast .ti{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;flex:none;margin-top:1px}
+  .toast .ti svg{width:11px;height:11px}
+  .toast.ok .ti{background:rgba(47,213,143,.18);color:#7fe8bc}
+  .toast.err .ti{background:rgba(255,93,108,.16);color:#ff8b95}
+  .toast.warn .ti{background:rgba(255,180,84,.16);color:#ffce8d}
+  .toast.info .ti{background:rgba(77,141,255,.18);color:var(--brand-2)}
+  .toast .tb{flex:1}
+  .toast .tt{font-weight:700;font-size:13px;margin-bottom:1px}
+  .toast .td{color:var(--sub);font-size:12.5px;word-break:break-all}
+  .toast .x{position:absolute;top:8px;right:8px;color:var(--dim);background:transparent;padding:2px}
+  .toast .x:hover{color:var(--txt)}
+  .toast .x svg{width:12px;height:12px;display:block}
+  .toast::after{content:"";position:absolute;left:0;bottom:0;height:2px;background:var(--line-strong);animation:prog 4s linear forwards}
+  .toast.ok::after{background:var(--green)}.toast.err::after{background:var(--red)}
+  .toast.warn::after{background:var(--amber)}.toast.info::after{background:var(--brand)}
+  @keyframes prog{from{width:100%}to{width:0}}
+
+  /* ============ Modal ============ */
+  .overlay{position:fixed;inset:0;z-index:80;background:rgba(4,7,13,.66);backdrop-filter:blur(4px);
+    display:none;place-items:center;animation:fade .2s}
+  .overlay.show{display:grid}
+  @keyframes fade{from{opacity:0}}
+  .modal{width:min(430px,calc(100vw - 40px));background:linear-gradient(180deg,#192135,#121827);
+    border:1px solid var(--line-strong);border-radius:18px;padding:22px;box-shadow:var(--shadow);
+    animation:pop .24s cubic-bezier(.2,.9,.3,1.25)}
+  @keyframes pop{from{opacity:0;transform:scale(.92) translateY(8px)}to{opacity:1;transform:none}}
+  .modal .m-ico{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;margin-bottom:14px}
+  .modal .m-ico svg{width:21px;height:21px}
+  .modal.danger .m-ico{background:rgba(255,93,108,.14);color:#ff8b95}
+  .modal.info .m-ico{background:rgba(77,141,255,.14);color:var(--brand-2)}
+  .modal .m-title{font-size:16px;font-weight:800;margin-bottom:6px}
+  .modal .m-body{font-size:13px;color:var(--sub);line-height:1.7;margin-bottom:6px}
+  .modal .m-body code{font-family:var(--mono);font-size:12px;color:var(--brand-2);background:rgba(77,141,255,.1);
+    padding:1px 6px;border-radius:5px}
+  .modal .m-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+
+  footer{color:var(--dim);font-size:11.5px;text-align:center;margin-top:22px;line-height:2}
+  footer .kbd{font-family:var(--mono);color:var(--sub);border:1px solid var(--line-strong);border-radius:5px;padding:0 5px;font-size:10.5px}
+
+  @media (max-width:1020px){
+    .hero{grid-template-columns:1fr;gap:16px}
+    .vdiv{display:none}
+    .h-actions{flex-direction:row;flex-wrap:wrap}
+    .span-6{grid-column:span 12}
+  }
+  @media (max-width:640px){
+    .h-info{grid-template-columns:1fr}
+    .brand h1{font-size:14px}
+  }
+</style>
+</head>
+<body>
+<!-- SVG 图标库 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-restart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
+    <symbol id="i-term" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-eyeoff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="3"/><circle cx="9" cy="14" r="1.2" fill="currentColor"/><circle cx="15" cy="14" r="1.2" fill="currentColor"/><line x1="9" y1="18" x2="15" y2="18"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1.2" fill="currentColor"/><line x1="4" y1="13" x2="2" y2="13"/><line x1="20" y1="13" x2="22" y2="13"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+  <!-- ===================== 顶栏 ===================== -->
+  <header class="top">
+    <div class="brand">
+      <div class="logo"><svg><use href="#i-bot"/></svg></div>
+      <div>
+        <h1>文档审核机器人</h1>
+        <div class="sub">飞书表格回链附件 · 智能审核运维控制台</div>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <span class="pill" id="apiPill"><span class="pdot"></span><span id="apiText">面板已连接</span></span>
+    <span class="pill off" style="display:none" id="apiDown"><span class="pdot"></span>面板离线</span>
+    <span id="clock"></span>
+  </header>
+
+  <!-- ===================== Hero 状态区 ===================== -->
+  <section class="hero" id="hero">
+    <div class="h-left">
+      <div class="h-eyebrow">
+        <span class="state-badge off" id="stBadge"><span class="dot"></span><span id="stText">检测中…</span></span>
+      </div>
+      <div class="h-status"><span id="heroBig">正在连接面板…</span></div>
+      <div class="h-meta" id="hMeta">
+        <span class="chip"><svg><use href="#i-clock"/></svg>已运行 <b id="uptime">--:--:--</b></span>
+        <span class="chip" id="pidChip" style="display:none"><svg><use href="#i-cpu"/></svg>pid <span id="pidTxt">--</span></span>
+        <span class="chip g" id="managedChip" style="display:none"><svg><use href="#i-lock"/></svg>本面板托管</span>
+      </div>
+    </div>
+    <div class="vdiv"></div>
+    <div class="h-info" id="hInfo">
+      <div class="kv"><div class="k">审核文档</div>
+        <div class="v"><span class="mono" id="kvToken" title="">未配置</span>
+          <span class="cpy" id="cpToken" title="复制 token"><svg><use href="#i-copy"/></svg></span></div></div>
+      <div class="kv"><div class="k">审核模式</div>
+        <div class="v" id="kvMode"><span class="tag rule">纯规则</span></div></div>
+      <div class="kv"><div class="k">LLM 模型</div>
+        <div class="v" id="kvModel" style="color:var(--sub)">—</div></div>
+      <div class="kv"><div class="k">列映射</div>
+        <div class="v" id="kvCols" style="color:var(--sub)">—</div></div>
+    </div>
+    <div class="h-actions">
+      <button class="btn-primary btn-lg" id="btnStart"><svg><use href="#i-play"/></svg>启动机器人</button>
+      <button class="btn-ghost btn-lg" id="btnRestart"><svg><use href="#i-restart"/></svg>重启</button>
+      <button class="btn-danger btn-lg" id="btnStop"><svg><use href="#i-stop"/></svg>停止</button>
+      <div class="note" id="ctrlNote"></div>
+    </div>
+  </section>
+
+  <!-- ===================== 配置卡片 ===================== -->
+  <div class="grid">
+
+    <!-- 审核表格文档 -->
+    <div class="card span-6" id="sheetCard">
+      <div class="c-head">
+        <div class="c-ico"><svg><use href="#i-file"/></svg></div>
+        <div>
+          <div class="c-title">审核表格文档</div>
+          <div class="c-sub">粘贴完整链接或 token，可先测试再保存</div>
+        </div>
+        <span class="c-badge" id="docBadge" style="display:none"></span>
+      </div>
+      <div class="c-body">
+        <div class="field">
+          <div class="f-label"><svg><use href="#i-link"/></svg>飞书表格链接</div>
+          <div class="input-wrap">
+            <input class="inp mono" id="spreadsheet" placeholder="https://xxx.feishu.cn/sheets/…"
+                   autocomplete="off" spellcheck="false">
+          </div>
+          <div class="parse-bar" id="parseBar"></div>
+          <div class="f-hint" id="sheetHint">粘贴后自动解析 token，无需手动截取。留空则保持当前文档。</div>
+        </div>
+        <button class="btn-soft" id="btnTest"><svg><use href="#i-refresh"/></svg>测试连接并列出工作表</button>
+        <div class="verdict" id="verdict"></div>
+        <div class="sheet-out" id="sheetOut"></div>
+      </div>
+    </div>
+
+    <!-- LLM 模型 -->
+    <div class="card span-6" id="llmCard">
+      <div class="c-head">
+        <div class="c-ico purple"><svg><use href="#i-cpu"/></svg></div>
+        <div>
+          <div class="c-title">LLM 深度审核</div>
+          <div class="c-sub">AI 判断回链附件是否存在违规风险</div>
+        </div>
+        <span class="c-badge" id="modeBadge" style="display:none"></span>
+      </div>
+      <div class="c-body">
+        <div class="field">
+          <div class="f-label"><svg><use href="#i-sliders"/></svg>模型名称</div>
+          <input class="inp" id="llmModel" placeholder="deepseek-chat" autocomplete="off" spellcheck="false">
+          <div class="f-hint" id="modelHint"></div>
+        </div>
+        <div class="field">
+          <div class="f-label"><svg><use href="#i-link"/></svg>API Base URL</div>
+          <input class="inp mono" id="llmBase" placeholder="https://api.deepseek.com" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <div class="f-label"><svg><use href="#i-key"/></svg>API Key</div>
+          <div class="input-wrap">
+            <input class="inp mono" id="llmKey" type="password" placeholder="留空则保持已保存的 Key"
+                   autocomplete="new-password" spellcheck="false" style="padding-right:38px">
+            <button class="eye" id="eyeBtn" title="显示 / 隐藏"><svg><use href="#i-eye"/></svg></button>
+          </div>
+        </div>
+        <div class="switch-row">
+          <div class="tx"><b style="color:#ff8b95">清除已保存的 Key</b> — 切换为纯规则审核（不调 AI）</div>
+          <label class="switch"><input type="checkbox" id="clearKey"><span class="slider"></span></label>
+        </div>
+        <div class="f-hint" id="llmHint"></div>
+      </div>
+    </div>
+
+    <!-- 高级列映射 -->
+    <div class="card span-6">
+      <div class="c-head">
+        <div class="c-ico amber"><svg><use href="#i-sliders"/></svg></div>
+        <div>
+          <div class="c-title">表头列名映射</div>
+          <div class="c-sub">当新表格的表头叫法与默认不同时才需要调整</div>
+        </div>
+        <span class="c-badge" id="colBadge" style="display:none"></span>
+      </div>
+      <div class="c-body">
+        <details id="colAcc">
+          <summary><svg class="chev"><use href="#i-chev"/></svg>展开高级设置<span class="f-hint" style="display:inline;margin-left:8px">项目 / 回链 / 机器审核 / 不通过原因</span></summary>
+          <div class="acc-body">
+            <div class="field" style="margin-top:10px">
+              <div class="f-label">「项目」列（审核关键词）</div>
+              <input class="inp" id="colKeyword" autocomplete="off">
+            </div>
+            <div class="field">
+              <div class="f-label">「回链」列（只审 .doc/.docx 附件行）</div>
+              <input class="inp" id="colLink" autocomplete="off">
+            </div>
+            <div class="field">
+              <div class="f-label">「机器审核」结果列</div>
+              <input class="inp" id="colResult" autocomplete="off">
+            </div>
+            <div class="field">
+              <div class="f-label">「不通过原因」列</div>
+              <input class="inp" id="colReason" autocomplete="off">
+            </div>
+            <div class="field" style="margin-bottom:2px">
+              <div class="f-label">违禁词（逗号分隔）</div>
+              <input class="inp" id="colForbidden" autocomplete="off">
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <!-- 快速上手 -->
+    <div class="card span-6">
+      <div class="c-head">
+        <div class="c-ico green"><svg><use href="#i-bot"/></svg></div>
+        <div>
+          <div class="c-title">机器人当前状态</div>
+          <div class="c-sub">运行详情与故障自查</div>
+        </div>
+      </div>
+      <div class="c-body" style="display:flex;flex-direction:column;gap:9px">
+        <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+          <span class="chip g" id="connChip"><span class="pdot" style="width:6px;height:6px;display:inline-block;border-radius:50%;background:var(--dim)"></span>飞书长连接待确认</span>
+          <span class="chip" id="confChip" style="display:none"></span>
+        </div>
+        <div style="font-size:12.5px;color:var(--sub);line-height:2">
+          <div>① 改动文档 / 模型后，点下方 <b style="color:var(--txt)">保存并重启</b> 生效</div>
+          <div>② 重启后，飞书单聊里那张「审核工作台」卡会自动 <b style="color:var(--txt)">原位刷新</b>，不会重复堆卡</div>
+          <div>③ 新一轮审核：直接点工作台卡选表即可，<b style="color:var(--txt)">无需重启</b></div>
+          <div style="color:var(--dim)">④ 长连接是否建立，以日志出现 <span style="font-family:var(--mono)">长连接已建立</span> 为准</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== 保存操作条 ===================== -->
+  <div class="actionbar" id="actionbar">
+    <div class="ab-tx" id="abTx">
+      <svg><use href="#i-save"/></svg>
+      <div>改动将在<b>保存后重启</b>机器人时生效 <span class="dirty-n" id="dirtyN"></span></div>
+    </div>
+    <button class="btn-soft" id="btnSaveOnly"><svg><use href="#i-save"/></svg>仅保存配置</button>
+    <button class="btn-primary save-cta" id="btnSaveRestart"><svg><use href="#i-restart"/></svg>保存并重启机器人</button>
+  </div>
+
+  <!-- ===================== 日志 ===================== -->
+  <div class="card logcard" style="margin-top:16px">
+    <div class="log-head">
+      <div class="c-ico"><svg><use href="#i-term"/></svg></div>
+      <div>
+        <div class="c-title">运行日志</div>
+        <div class="c-sub">bot 启动 / 工作台卡推送 / 审核过程 / 报错</div>
+      </div>
+      <div class="tabs">
+        <button class="tab act" id="tabRuntime">运行<span class="cnt" id="cntRun"></span></button>
+        <button class="tab" id="tabAudit">审核<span class="cnt" id="cntAudit"></span></button>
+      </div>
+      <div class="log-tools">
+        <button class="icon-btn" id="btnFollow" title="自动跟随最新日志"><svg><use href="#i-arrow"/></svg></button>
+        <button class="icon-btn danger" id="btnClearLog" title="清空当前显示（不影响文件）"><svg><use href="#i-trash"/></svg></button>
+      </div>
+    </div>
+    <div class="log-body" id="logBody"><div class="log-empty" id="logEmpty">加载中…</div></div>
+  </div>
+
+  <footer>
+    本页面仅本机可访问（127.0.0.1:8788）· 配置目录 D:\WorkBuddy\feishu-audit · bot.py 未改动，仍可独立运行<br>
+    快捷键：<span class="kbd">Ctrl</span>+<span class="kbd">S</span> 保存配置 · <span class="kbd">Esc</span> 关闭弹窗
+  </footer>
+</div>
+
+<!-- Toast 容器 -->
+<div id="toasts"></div>
+
+<!-- 确认弹窗 -->
+<div class="overlay" id="overlay">
+  <div class="modal danger" id="modal">
+    <div class="m-ico" id="mIco"><svg><use href="#i-alert"/></svg></div>
+    <div class="m-title" id="mTitle">确认操作</div>
+    <div class="m-body" id="mBody"></div>
+    <div class="m-actions">
+      <button class="btn-ghost" id="mCancel">取消</button>
+      <button class="btn-danger" id="mOk">确认</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const $$ = sel => Array.from(document.querySelectorAll(sel));
+
+/* ---------------- 全局状态 ---------------- */
+let st = {bot:{running:false,managed:false}, config:{llm:{},columns:{},forbidden_words:[]}};
+let logSrc = "runtime", logTimer = null, followLog = true, dirtyCount = 0;
+let lastLogLines = "";
+
+/* ---------------- 图标工具 ---------------- */
+function icon(name){ return '<svg><use href="#i-'+name+'"/></svg>'; }
+
+/* ---------------- Toast ---------------- */
+function toast(type, title, desc, ms){
+  const box = $("toasts");
+  const el = document.createElement("div");
+  el.className = "toast "+type;
+  const ico = {ok:"i-check", err:"i-x", warn:"i-alert", info:"i-help"}[type]||"i-help";
+  el.innerHTML = '<div class="ti">'+icon(ico)+'</div>'+
+    '<div class="tb"><div class="tt"></div><div class="td"></div></div>'+
+    '<button class="x">'+icon("i-x")+'</button>';
+  el.querySelector(".tt").textContent = title;
+  el.querySelector(".td").textContent = desc || "";
+  box.appendChild(el);
+  const kill = ()=>{ el.classList.add("out"); setTimeout(()=>el.remove(), 260); };
+  el.querySelector(".x").onclick = kill;
+  setTimeout(kill, ms||4200);
+  while (box.children.length > 5) box.firstChild.remove();
+}
+
+/* ---------------- 确认弹窗 ---------------- */
+let modalCb = null;
+function confirmDlg(opts){
+  return new Promise(res=>{
+    modalCb = res;
+    const ov = $("overlay"), m = $("modal");
+    m.className = "modal "+(opts.danger===false?"info":"danger");
+    $("mIco").innerHTML = icon(opts.danger===false?"i-help":"i-alert");
+    $("mTitle").textContent = opts.title;
+    $("mBody").innerHTML = opts.body;
+    $("mOk").className = opts.danger===false?"btn-primary":"btn-danger";
+    $("mOk").textContent = opts.okText||"确认";
+    $("mCancel").textContent = opts.cancelText||"取消";
+    ov.classList.add("show");
+    $("mOk").focus();
+  });
+}
+function closeModal(v){ $("overlay").classList.remove("show"); if(modalCb){modalCb(v);modalCb=null;} }
+$("mOk").onclick = ()=>closeModal(true);
+$("mCancel").onclick = ()=>closeModal(false);
+$("overlay").onclick = e=>{ if(e.target===$("overlay")) closeModal(false); };
+document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeModal(false); });
+
+/* ---------------- 时钟 & 运行计时 ---------------- */
+function tickClock(){
+  $("clock").textContent = new Date().toLocaleString("zh-CN",{hour12:false});
+}
+function fmtDur(sec){
+  sec = Math.max(0, Math.floor(sec));
+  const h = String(Math.floor(sec/3600)).padStart(2,"0");
+  const m = String(Math.floor(sec%3600/60)).padStart(2,"0");
+  const s = String(sec%60).padStart(2,"0");
+  return h+":"+m+":"+s;
+}
+function tickUptime(){
+  const b = st.bot||{};
+  if(b.running && b.started_at){
+    $("uptime").textContent = fmtDur(Date.now()/1000 - b.started_at);
+  }
+}
+
+/* ---------------- 渲染：Hero 状态 ---------------- */
+function renderStatus(){
+  const b = st.bot||{}, running = !!b.running;
+  const badge = $("stBadge");
+  badge.className = "state-badge "+(running?"on":"off");
+  $("stText").textContent = running?"运行中":"已停止";
+  $("heroBig").innerHTML = running
+    ? '<span class="t-running">● 审核服务运行中</span>'
+    : '<span class="t-stopped">○ 服务已停止</span>';
+
+  $("pidChip").style.display = running?"":"none";
+  if(running && b.pid) $("pidTxt").textContent = b.pid;
+  $("managedChip").style.display = (running && b.managed)?"":"none";
+
+  // 启停按钮
+  $("btnStart").style.display = running?"none":"";
+  $("btnRestart").style.display = running?"":"none";
+  $("btnStop").style.display = running?"":"none";
+  $("ctrlNote").textContent = running
+    ? (b.managed?"由本面板托管 · 重启约 10 秒内刷新工作台卡":"外部进程（面板已认领）")
+    : "当前未运行，可点击启动";
+
+  // 连接指示
+  const conn = $("connChip");
+  if(running){
+    conn.className="chip g";
+    conn.innerHTML='<span class="pdot" style="width:6px;height:6px;display:inline-block;border-radius:50%;background:var(--green)"></span>机器人进程在线（pid '+b.pid+'）';
+  }else{
+    conn.className="chip";
+    conn.innerHTML='<span class="pdot" style="width:6px;height:6px;display:inline-block;border-radius:50%;background:var(--dim)"></span>进程未运行';
+  }
+
+  tickUptime();
+}
+
+/* ---------------- 渲染：配置摘要 ---------------- */
+function shortTok(t){ if(!t) return "未配置"; return t.length>16 ? t.slice(0,10)+"…"+t.slice(-6) : t; }
+
+function renderConfig(){
+  const c = st.config||{}, llm = c.llm||{}, cols = c.columns||{};
+  const tk = c.spreadsheet_token||"";
+  const kvT = $("kvToken");
+  kvT.textContent = tk? shortTok(tk) : "未配置";
+  kvT.title = tk? ("token: "+tk) : "";
+  $("cpToken").style.display = tk?"":"none";
+
+  const deep = !!llm.api_key_set;
+  const modeBadge = $("modeBadge");
+  modeBadge.style.display = "";
+  modeBadge.className = "c-badge "+(deep?"g":"y");
+  modeBadge.textContent = deep? "● 深度审核已启用":"○ 纯规则审核";
+  $("kvMode").innerHTML = deep
+    ? '<span class="tag deep">深度审核</span>'
+    : '<span class="tag rule">纯规则</span>';
+  $("kvModel").textContent = llm.model || "—";
+  $("kvModel").style.color = deep? "var(--txt)":"var(--sub)";
+  $("kvCols").textContent = (cols.keyword||"—")+" / "+(cols.link||"—")+" / "+(cols.result||"—");
+
+  // 占位符显示“当前值”（不改动输入中的 value）
+  const ph = {
+    spreadsheet: tk? "当前："+tk : "https://xxx.feishu.cn/sheets/…",
+    llmModel: llm.model||"deepseek-chat",
+    llmBase: llm.base_url||"https://api.deepseek.com",
+    colKeyword: cols.keyword||"项目",
+    colLink: cols.link||"回链",
+    colResult: cols.result||"机器审核",
+    colReason: cols.reason||"不通过原因",
+    colForbidden: (c.forbidden_words||[]).join("，"),
+  };
+  Object.keys(ph).forEach(id=>{
+    const el = $(id);
+    if(!el.value) el.placeholder = ph[id];
+  });
+  $("sheetHint").textContent = tk? "当前文档："+tk+" — 粘贴新链接替换，留空则保持当前" : "粘贴后自动解析 token，留空保持当前";
+  $("modelHint").textContent = deep? "当前生效："+llm.model+"（"+llm.base_url+"）":"当前未配置 API Key，仅用规则审核。填入 Key 并保存后自动启用深度审核。";
+  $("llmHint").textContent = deep? "当前已配置 API Key（已打码存储）":"";
+  $("confChip").style.display = tk? "":"none";
+  if(tk) $("confChip").textContent = "token "+(tk.length>20?tk.slice(0,8)+"…"+tk.slice(-8):tk);
+}
+
+/* ---------------- 状态轮询 ---------------- */
+let lastKey="";
+async function refreshState(){
+  try{
+    const r = await fetch("/api/state",{cache:"no-store"});
+    const j = await r.json();
+    if(!j.ok) throw 0;
+    st = j;
+    $("apiPill").style.display=""; $("apiDown").style.display="none";
+    renderStatus(); renderConfig();
+    // 有未保存修改时高亮
+    const anyDirty = countDirty()>0;
+    if(!anyDirty) setDirty(0);
+    // 若 bot 状态跳变（如外面停了）给出提示
+    const key = JSON.stringify([j.bot&&j.bot.running, (j.bot||{}).pid]);
+    if(lastKey && key!==lastKey){
+      const running = j.bot&&j.bot.running;
+      toast(running?"info":"warn", running?"机器人已启动":"机器人已停止",
+            running?("pid "+j.bot.pid) : "可通过左侧按钮重新启动");
+    }
+    lastKey = key;
+  }catch(e){
+    $("apiPill").style.display="none"; $("apiDown").style.display="";
+    $("stText").textContent="面板离线";
+    $("heroBig").innerHTML='<span style="color:var(--red)">⚠ 无法连接面板服务</span>';
+  }
+}
+
+/* ---------------- 脏检测（未保存修改） ---------------- */
+const FIELD_IDS = ["spreadsheet","llmModel","llmBase","llmKey",
+                   "colKeyword","colLink","colResult","colReason","colForbidden"];
+function countDirty(){
+  let n = 0;
+  FIELD_IDS.forEach(id=>{ if($(id).value.trim()) n++; });
+  if($("clearKey").checked) n++;
+  return n;
+}
+function setDirty(n){
+  dirtyCount = n;
+  $("dirtyN").textContent = n ? ("未保存 "+n) : "";
+  $("abTx").classList.toggle("dirty", n>0);
+  $("actionbar").style.borderColor = n? "rgba(255,180,84,.55)":"";
+}
+function onFieldInput(){
+  const n = countDirty();
+  setDirty(n);
+  if(n>0) toast("info","有未保存的修改", n+" 处改动尚未保存，点下方「保存并重启」生效", 1800);
+}
+$$("input").forEach(el=> el.addEventListener("input", onFieldInput));
+$("clearKey").addEventListener("change", onFieldInput);
+
+/* ---------------- 链接实时解析 ---------------- */
+const TOKEN_RE = /(?:\/sheets\/|\/base\/)([A-Za-z0-9]{15,})|(?:^|[\s,，])([A-Za-z0-9]{20,})(?:[\s,，]|$)/;
+function parseToken(v){
+  v = (v||"").trim();
+  if(!v) return {ok:null, tok:""};
+  if(/^[A-Za-z0-9]{20,}$/.test(v)) return {ok:true, tok:v};
+  const m = v.match(/\/sheets\/([A-Za-z0-9]{15,})/);
+  if(m) return {ok:true, tok:m[1]};
+  return {ok:false, tok:""};
+}
+$("spreadsheet").addEventListener("input", function(){
+  const bar = $("parseBar");
+  const r = parseToken(this.value);
+  if(!this.value.trim()){ bar.style.display="none"; this.classList.remove("err","ok"); return; }
+  if(r.ok){
+    bar.style.display="flex"; bar.className="parse-bar";
+    bar.innerHTML = icon("i-check")+' 解析成功 → 将更新为 <b>'+r.tok+'</b>';
+    this.classList.remove("err"); this.classList.add("ok");
+  }else{
+    bar.style.display="flex"; bar.className="parse-bar err";
+    bar.innerHTML = icon("i-alert")+' 未识别到 token：请粘贴完整 /sheets/ 链接或纯 token';
+    this.classList.remove("ok"); this.classList.add("err");
+  }
+});
+
+/* ---------------- Key 显隐 ---------------- */
+let keyVisible=false;
+$("eyeBtn").onclick = function(){
+  keyVisible = !keyVisible;
+  const k = $("llmKey");
+  k.type = keyVisible? "text":"password";
+  this.innerHTML = icon(keyVisible?"i-eyeoff":"i-eye");
+};
+$("clearKey").addEventListener("change", function(){
+  const k = $("llmKey");
+  k.disabled = this.checked;
+  k.value = "";
+  if(this.checked){ k.placeholder="（保存后将清除已存 Key）"; }
+  else { k.placeholder = st.config.llm.api_key_set? "留空则保持已保存的 Key":"sk-…"; }
+});
+
+/* ---------------- 复制 ---------------- */
+async function copyText(txt, okMsg){
+  try{ await navigator.clipboard.writeText(txt); toast("ok","已复制", okMsg||txt, 2000); }
+  catch(e){ toast("warn","复制失败","请手动复制："+txt); }
+}
+$("cpToken").onclick = function(){
+  const t = (st.config||{}).spreadsheet_token;
+  if(t) copyText(t, "token 已复制到剪贴板");
+};
+
+/* ---------------- 按钮 loading ---------------- */
+function setLoading(btn, loading, label){
+  if(loading){ btn.dataset.html = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spin"></span>'+(label||"处理中…"); }
+  else { btn.disabled = false; if(btn.dataset.html) btn.innerHTML = btn.dataset.html; }
+}
+
+/* ---------------- API 调用 ---------------- */
+async function api(path, opts={}){
+  const r = await fetch(path, Object.assign({headers:{"Content-Type":"application/json"}}, opts));
+  const j = await r.json();
+  if(!j.ok && !("ok" in j && j.ok)) throw new Error(j.msg || ("HTTP "+r.status));
+  return j;
+}
+
+/* ---------------- 收集配置 ---------------- */
+function collect(){
+  const c = {};
+  const v = $("spreadsheet").value.trim();
+  if(v) c.spreadsheet = v;
+  const llm = {};
+  if($("llmModel").value.trim()) llm.model = $("llmModel").value.trim();
+  if($("llmBase").value.trim()) llm.base_url = $("llmBase").value.trim();
+  if($("llmKey").value.trim()) llm.api_key = $("llmKey").value.trim();
+  if($("clearKey").checked) llm.clear_api_key = true;
+  if(Object.keys(llm).length) c.llm = llm;
+  const cols = {};
+  ["Keyword","Link","Result","Reason"].forEach(k=>{
+    const el = $("col"+k); if(el.value.trim()) cols[k.toLowerCase()] = el.value.trim(); });
+  if(Object.keys(cols).length) c.columns = cols;
+  if($("colForbidden").value.trim()) c.forbidden_words = $("colForbidden").value.trim();
+  return c;
+}
+function clearFields(){
+  ["spreadsheet","llmModel","llmBase","llmKey",
+   "colKeyword","colLink","colResult","colReason","colForbidden"].forEach(id=> $(id).value="");
+  $("clearKey").checked = false; $("llmKey").disabled = false;
+  const pb = $("parseBar"); pb.style.display="none";
+  setDirty(0);
+}
+
+/* ---------------- 保存 ---------------- */
+async function doSave(restart){
+  const payload = collect();
+  if(!Object.keys(payload).length){
+    toast("warn","没有改动", restart?"表单留空 = 保持当前配置":"没有需要保存的内容");
+    return;
+  }
+  const btn = restart? $("btnSaveRestart"):$("btnSaveOnly");
+  setLoading(btn, true, restart?"保存并重启中…":"保存中…");
+  try{
+    const r = await api("/api/config", {method:"POST", body:JSON.stringify(payload)});
+    toast("ok","配置已保存", r.msg);
+    clearFields();
+    if(restart){
+      const running = st.bot && st.bot.running;
+      if(running){
+        toast("info","正在重启机器人", "约 10 秒内飞书工作台卡将原位刷新", 3500);
+        const rr = await api("/api/bot", {method:"POST", body:JSON.stringify({action:"restart"})});
+        toast("ok","重启成功", rr.msg);
+      }else{
+        toast("info","配置已保存","机器人未运行，点「启动机器人」使其生效");
+      }
+    }
+    await refreshState();
+  }catch(e){
+    toast("err","操作失败", e.message);
+  }
+  setLoading(btn, false);
+}
+$("btnSaveOnly").onclick = ()=>doSave(false);
+$("btnSaveRestart").onclick = ()=>doSave(true);
+
+/* ---------------- 机器人启停 ---------------- */
+async function botAct(act){
+  const names = {start:"启动", restart:"重启", stop:"停止"};
+  const btnMap = {start:"btnStart", restart:"btnRestart", stop:"btnStop"};
+  const btn = $(btnMap[act]);
+  setLoading(btn, true);
+  try{
+    const r = await api("/api/bot", {method:"POST", body:JSON.stringify({action:act})});
+    toast("ok", (act==="stop"?"已停止":"已"+(act==="start"?"启动":"重启"))+(r.pid?(" · pid "+r.pid):""), r.msg);
+    if(act!=="stop") toast("info","工作台卡刷新中","请留意飞书单聊顶部那张卡片",2600);
+    await new Promise(res=>setTimeout(res,600));
+    await refreshState();
+  }catch(e){ toast("err",names[act]+"失败", e.message); }
+  setLoading(btn, false);
+}
+function guardBot(act){
+  if(act==="start") return botAct("start");
+  const isStop = act==="stop";
+  confirmDlg({
+    title: isStop? "停止审核机器人？":"重启审核机器人？",
+    danger: true,
+    okText: isStop?"停止":"重启",
+    body: isStop
+      ? "机器人将断开飞书长连接，<b>审核服务停止</b>。可随时再点「启动」恢复。"
+      : "机器人将重启：断开重连飞书、<b>原位刷新</b>顶部工作台卡（不重复推送）。运行约需 10 秒。",
+  }).then(ok=>{ if(ok) botAct(act); });
+}
+$("btnStart").onclick = ()=>guardBot("start");
+$("btnRestart").onclick = ()=>guardBot("restart");
+$("btnStop").onclick   = ()=>guardBot("stop");
+
+/* ---------------- 测试连接 ---------------- */
+$("btnTest").onclick = async function(){
+  const verdict = $("verdict"), out = $("sheetOut");
+  verdict.className = "verdict run";
+  verdict.innerHTML = '<span class="vi">'+icon("i-refresh")+'</span> 正在连接飞书并读取工作表…';
+  out.innerHTML = "";
+  setLoading(this, true, "连接中…");
+  try{
+    const r = await api("/api/verify", {method:"POST", body:"{}"});
+    const okN = r.sheets.filter(s=>s.usable).length;
+    verdict.className = "verdict ok";
+    verdict.innerHTML = '<span class="vi">'+icon("i-check")+'</span>连接成功 · '+r.total+' 个工作表，'+okN+' 个可用 <span class="em">'+shortTok(r.token)+'</span><span class="ms">'+r.cost_ms+'ms</span>';
+    const rows = r.sheets.map(s=>
+      '<span class="s-chip '+(s.usable?"":"off")+'" title="'+(s.usable?"可审核（含项目/回链列）":"缺少「项目/回链」列，会跳过")+'">'+
+      '<span class="sd"></span>'+esc(s.title)+(s.usable?"":'<span class="tag2">缺列</span>')+'</span>').join("");
+    out.innerHTML = rows || '<span style="color:var(--dim);font-size:12px">（未读到任何工作表）</span>';
+    $("docBadge").style.display=""; $("docBadge").className="c-badge g"; $("docBadge").textContent = "● 连接正常";
+  }catch(e){
+    verdict.className = "verdict err";
+    verdict.innerHTML = '<span class="vi">'+icon("i-x")+'</span>连接失败：'+esc(e.message);
+    const hint = document.createElement("div");
+    hint.style.cssText="font-size:12px;color:var(--amber);margin-top:8px;line-height:1.7";
+    hint.innerHTML = '排查：① 确认表格已分享给应用「文档审核机器人」并给 <b>可编辑</b> 权限 ② token 是否正确 ③ 保存后重试（测试用的是已保存配置）';
+    out.innerHTML=""; out.appendChild(hint);
+    $("docBadge").style.display=""; $("docBadge").className="c-badge y"; $("docBadge").textContent="△ 连接异常";
+  }
+  setLoading(this, false);
+};
+function esc(s){ return String(s).replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
+
+/* ---------------- 日志 ---------------- */
+function colorize(line){
+  if(/\[panel/i.test(line)) return {cls:"sys", t:line};
+  if(/traceback|error|exception|失败|异常|无权限|denied|refused|超时|fatal/i.test(line)) return {cls:"err"};
+  if(/已置顶|已推送|已原位刷新|推送成功|发送成功|长连接已建立|connected|identity|登录|启动成功|回写成功|✅|✔|已连接/i.test(line)) return {cls:"ok"};
+  if(/warn|警告|重试|retry|跳过|skip|注意/i.test(line)) return {cls:"warn"};
+  if(/^\[|^\d{2}:\d{2}|^\d{4}-\d{2}/.test(line)) return {cls:"", t:""};
+  return {cls:"dim"};
+}
+async function loadLog(force){
+  try{
+    const r = await fetch("/api/log?src="+logSrc+"&n=200", {cache:"no-store"});
+    const j = await r.json();
+    const lines = j.lines||[];
+    const body = $("logBody"), empty = $("logEmpty");
+    const joined = lines.join("\n");
+    if(joined===lastLogLines && !force) return;
+    lastLogLines = joined;
+
+    const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 30;
+    const frag = document.createDocumentFragment();
+    lines.forEach(line=>{
+      const c = colorize(line);
+      const d = document.createElement("div");
+      d.className = "ln "+(c.cls||"");
+      const m = line.match(/^(\[\d{2}:\d{2}:\d{2}\]\s*|\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\s*)/);
+      let inner = "";
+      if(m){ inner += '<span class="t">'+esc(m[0])+'</span>'+esc(line.slice(m[0].length)); }
+      else inner = esc(line);
+      d.innerHTML = inner;
+      frag.appendChild(d);
+    });
+    body.innerHTML="";
+    body.appendChild(frag);
+    empty.style.display = lines.length? "none":"grid";
+    empty.textContent = "（暂无日志）";
+
+    // 计数
+    const cntRun = lines.filter(l=>/\[panel|长连接|工作台|审核/i.test(l)).length;
+    const cntAudit = lines.filter(l=>/行|✅|❌|通过|不通过|开始审核/i.test(l)).length;
+    $("cntRun").textContent = cntRun||"";
+    $("cntAudit").textContent = cntAudit||"";
+
+    if(followLog || force || atBottom) body.scrollTop = body.scrollHeight;
+  }catch(e){/* 忽略瞬时错误 */}
+}
+function setLogTab(t){
+  logSrc = t;
+  $("tabRuntime").className = t==="runtime"?"tab act":"tab";
+  $("tabAudit").className = t==="audit"?"tab act":"tab";
+  lastLogLines="";
+  loadLog(true);
+}
+$("tabRuntime").onclick = ()=>setLogTab("runtime");
+$("tabAudit").onclick = ()=>setLogTab("audit");
+$("btnFollow").onclick = function(){
+  followLog = !followLog;
+  this.classList.toggle("on", followLog);
+  this.title = followLog?"自动跟随最新日志":"已暂停跟随";
+  if(followLog) loadLog(true);
+};
+$("btnClearLog").onclick = function(){
+  $("logBody").innerHTML = '<div class="log-empty">已清空显示（文件未受影响，将自动恢复）</div>';
+  lastLogLines = "__cleared__";
+  toast("info","已清空显示","日志文件未被删除，下轮刷新自动恢复");
+};
+
+/* ---------------- 快捷键 ---------------- */
+document.addEventListener("keydown", e=>{
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="s"){
+    e.preventDefault(); doSave(true);
+  }
+});
+
+/* ---------------- 启动 ---------------- */
+(async function init(){
+  tickClock(); setInterval(tickClock, 1000);
+  setInterval(tickUptime, 1000);
+  $("btnFollow").classList.add("on");
+  try{
+    await refreshState();
+  }catch(e){}
+  setInterval(refreshState, 5000);
+  setLogTab("runtime");
+  logTimer = setInterval(()=>loadLog(false), 3000);
+  setInterval(()=>{ if(followLog) loadLog(false); }, 8000);
+  setTimeout(()=>{
+    const b = st.bot||{};
+    if(!b.running) toast("info","机器人未运行","填好配置后点「保存并重启」或「启动机器人」上线", 5000);
+    else toast("ok","面板已就绪","机器人 pid "+b.pid+" 运行中 · 改动配置后记得保存重启", 4000);
+  }, 900);
+})();
+</script>
+</body>
+</html>

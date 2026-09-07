@@ -1,0 +1,40 @@
+# ============================================================
+# 飞书文档审核机器人 · 配置模板
+# 用法：复制本文件为 config.yaml 后填写。config.yaml 已被 .gitignore
+#       排除，请勿提交到任何仓库（含 app_secret / api_key 等密钥）。
+# 完整说明见 README.md「配置」章节；也可直接在运维面板里填写并保存。
+# ============================================================
+
+# 飞书开放平台应用凭证（开放平台 > 你的应用 > 凭证与基础信息）
+app_id: cli_xxxxxxxxxxxxxxxx
+app_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# 待审核的电子表格（链接中 /sheets/ 后面那串字符；支持粘贴完整链接自动解析）
+spreadsheet_token: xxxxxxxxxxxxxxxxxxxxxxxx
+# 表格所在云空间文件夹 token（/folder/ 后面的部分）。
+# 留空则按文件名全盘搜索（用于把附件名映射回本地文件，非必需，一般留空）
+folder_token: ""
+
+# ===== LLM 品牌识别（可选）=====
+# 任意 OpenAI 兼容 /chat/completions 接口均可。
+# api_key 留空 = 纯词库模式（仅规则一/二/三 + 本地竞品词库，不发 LLM 请求）
+llm:
+  base_url: https://api.deepseek.com
+  api_key: ""
+  model: deepseek-chat
+
+# ===== 表头列名映射 =====
+# 按目标表格的实际表头填写；机器人只审「回链」列中的 .doc/.docx 附件，
+# 其他链接或空值一律跳过。「机器审核」列已有值的行会自动跳过（可增量补审）。
+columns:
+  keyword: 项目          # 我方关键词（一格里可放多个，用逗号/顿号/空格分隔）
+  link: 回链            # 文档附件所在列
+  result: 机器审核       # 审核结果回写列
+  reason: 不通过原因     # 不通过原因回写列
+
+# ===== 规则二：违禁词（出现即不通过）=====
+forbidden_words: [AI生成, 免责声明]
+
+# ===== 高级：规则词库 =====
+# wordbooks/ai_terms.yaml  规则一 AI 痕迹词库（命中即不通过）
+# wordbooks/brands.yaml    本地竞品品牌词库（参与规则三位置比对）
