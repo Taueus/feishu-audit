@@ -4,6 +4,7 @@
 规则一：AI 痕迹词库匹配（wordbooks/ai_terms.yaml）
 规则二：写死违禁词精确匹配（默认「AI生成」「免责声明」）
 规则三：我方关键词首次出现位置必须早于任何竞品
+（规则四 · 观点级主角性为 LLM 判定，见 fsaudit/viewpoint.py，由 engine 调用）
 """
 import os
 import re
@@ -76,18 +77,28 @@ def rule3_check(text, keywords, competitors):
     return True, None
 
 
-def audit_text(text, keywords, ai_terms, forbidden_words, competitors):
-    """执行三条规则，返回 {"passed": bool, "reasons": [str]}"""
+def audit_text(text, keywords, ai_terms, forbidden_words, competitors, rules_enabled=None):
+    """执行确定性审核规则（规则一二三），返回 {"passed": bool, "reasons": [str]}
+    rules_enabled: dict，键为 r1/r2/r3；缺省视为全开。
+    规则四/五（LLM 判定）由 engine 另行调用并按 r4/r5 开关决定是否触发。"""
+    enabled = {"r1": True, "r2": True, "r3": True}
+    if rules_enabled:
+        for k in ("r1", "r2", "r3"):
+            if k in rules_enabled:
+                enabled[k] = bool(rules_enabled[k])
     reasons = []
-    r1 = rule1_hits(text, ai_terms)
-    if r1:
-        reasons.append("规则一：检测到AI痕迹词「%s」" % "、".join(r1))
-    r2 = rule2_hits(text, forbidden_words)
-    if r2:
-        reasons.append("规则二：出现违禁词「%s」" % "、".join(r2))
-    ok3, why = rule3_check(text, keywords, competitors)
-    if not ok3:
-        reasons.append(why)
+    if enabled["r1"]:
+        r1 = rule1_hits(text, ai_terms)
+        if r1:
+            reasons.append("规则一：检测到AI痕迹词「%s」" % "、".join(r1))
+    if enabled["r2"]:
+        r2 = rule2_hits(text, forbidden_words)
+        if r2:
+            reasons.append("规则二：出现违禁词「%s」" % "、".join(r2))
+    if enabled["r3"]:
+        ok3, why = rule3_check(text, keywords, competitors)
+        if not ok3:
+            reasons.append(why)
     return {"passed": not reasons, "reasons": reasons}
 
 

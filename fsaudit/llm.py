@@ -46,7 +46,7 @@ class BrandIdentifier(object):
                      "Content-Type": "application/json"},
             json={"model": self.cfg.model, "temperature": temperature,
                   "max_tokens": max_tokens, "messages": messages},
-            timeout=180,
+            timeout=40,
         )
         if r.status_code != 200:
             raise RuntimeError("LLM HTTP %d：%s" % (r.status_code, r.text[:200]))

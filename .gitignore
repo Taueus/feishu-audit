@@ -27,3 +27,10 @@ preview_sheets.py
 .idea/
 .DS_Store
 Thumbs.db
+
+# 一次性调试/回归脚本（本机专用）
+regress_*.py
+_regress_*.json
+stats_probe2.py
+writeback_rule4b.py
+start_manage.bat

@@ -458,6 +458,55 @@
       </div>
     </div>
 
+    <!-- 审核规则启停（5 条规则独立开关） -->
+    <div class="card span-12" id="rulesCard">
+      <div class="c-head">
+        <div class="c-ico green"><svg><use href="#i-bot"/></svg></div>
+        <div>
+          <div class="c-title">审核规则启停</div>
+          <div class="c-sub">每条规则可独立启用/停用；停用后该规则不参与判罚（规则四/五还省 LLM 调用）</div>
+        </div>
+      </div>
+      <div class="c-body">
+        <div class="switch-row" data-rule="r1">
+          <div class="tx">
+            <b>规则一·AI 痕迹词</b>
+            <div class="muted">本地词库匹配；命中即不通过</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="ruleR1"><span class="slider"></span></label>
+        </div>
+        <div class="switch-row" data-rule="r2">
+          <div class="tx">
+            <b>规则二·违禁词</b>
+            <div class="muted">默认禁「AI生成 / 免责声明」；命中即不通过</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="ruleR2"><span class="slider"></span></label>
+        </div>
+        <div class="switch-row" data-rule="r3">
+          <div class="tx">
+            <b>规则三·关键词位置</b>
+            <div class="muted">我方关键词须先于竞品出现；早出现则不通过</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="ruleR3"><span class="slider"></span></label>
+        </div>
+        <div class="switch-row" data-rule="r4">
+          <div class="tx">
+            <b>规则四·观点级主角性（LLM）</b>
+            <div class="muted">观点块层面：我方须先/不缺席；竞品不得占据整个观点；避雷块不得出现我方</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="ruleR4"><span class="slider"></span></label>
+        </div>
+        <div class="switch-row" data-rule="r5">
+          <div class="tx">
+            <b>规则五·AI 人味 &amp; 收录友好度（LLM+启发式）</b>
+            <div class="muted">人/AI 双重通过 + 利于 AI 引擎收录；硬性项一票否决，建议项进原因列</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="ruleR5"><span class="slider"></span></label>
+        </div>
+        <div class="f-hint" id="rulesHint" style="margin-top:8px"></div>
+      </div>
+    </div>
+
     <!-- 高级列映射 -->
     <div class="card span-6">
       <div class="c-head">
@@ -488,7 +537,7 @@
               <div class="f-label">「不通过原因」列</div>
               <input class="inp" id="colReason" autocomplete="off">
             </div>
-            <div class="field" style="margin-bottom:2px">
+            <div class="field">
               <div class="f-label">违禁词（逗号分隔）</div>
               <input class="inp" id="colForbidden" autocomplete="off">
             </div>
@@ -579,7 +628,7 @@ const $ = id => document.getElementById(id);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
 
 /* ---------------- 全局状态 ---------------- */
-let st = {bot:{running:false,managed:false}, config:{llm:{},columns:{},forbidden_words:[]}};
+let st = {bot:{running:false,managed:false}, config:{llm:{},columns:{},forbidden_words:[],rules_enabled:{r1:true,r2:true,r3:true,r4:true,r5:true}}};
 let logSrc = "runtime", logTimer = null, followLog = true, dirtyCount = 0;
 let lastLogLines = "";
 
@@ -703,7 +752,23 @@ function renderConfig(){
   $("kvModel").style.color = deep? "var(--txt)":"var(--sub)";
   $("kvCols").textContent = (cols.keyword||"—")+" / "+(cols.link||"—")+" / "+(cols.result||"—");
 
-  // 占位符显示“当前值”（不改动输入中的 value）
+  // 五条规则启停渲染（统一由 rules_enabled 字典驱动）
+  const re = c.rules_enabled || {};
+  const setRule = (id, on) => { const el = $(id); if (el) el.checked = !!on; };
+  setRule("ruleR1", re.r1 !== false);
+  setRule("ruleR2", re.r2 !== false);
+  setRule("ruleR3", re.r3 !== false);
+  setRule("ruleR4", re.r4 !== false);
+  setRule("ruleR5", re.r5 !== false);
+  const llmOn = !!re.r5 || !!re.r4;
+  const rulesHint = $("rulesHint");
+  if (rulesHint){
+    rulesHint.textContent = llmOn && !deep
+      ? "已开启 LLM 类规则但当前未配置 API Key，对应规则不会启用；保存 Key 后自动生效"
+      : "· 规则一/二/三为本地确定性（零费用）· 规则四/五调用 LLM（消耗 token）";
+  }
+
+  // 占位符显示"当前值"（不改动输入中的 value）
   const ph = {
     spreadsheet: tk? "当前："+tk : "https://xxx.feishu.cn/sheets/…",
     llmModel: llm.model||"deepseek-chat",
@@ -857,12 +922,22 @@ function collect(){
     const el = $("col"+k); if(el.value.trim()) cols[k.toLowerCase()] = el.value.trim(); });
   if(Object.keys(cols).length) c.columns = cols;
   if($("colForbidden").value.trim()) c.forbidden_words = $("colForbidden").value.trim();
+  // 五条规则启停开关
+  c.rules_enabled = {
+    r1: $("ruleR1").checked,
+    r2: $("ruleR2").checked,
+    r3: $("ruleR3").checked,
+    r4: $("ruleR4").checked,
+    r5: $("ruleR5").checked,
+  };
   return c;
 }
 function clearFields(){
   ["spreadsheet","llmModel","llmBase","llmKey",
    "colKeyword","colLink","colResult","colReason","colForbidden"].forEach(id=> $(id).value="");
   $("clearKey").checked = false; $("llmKey").disabled = false;
+  // 五条规则默认全部启用
+  ["ruleR1","ruleR2","ruleR3","ruleR4","ruleR5"].forEach(id=> { const el=$(id); if(el) el.checked = true; });
   const pb = $("parseBar"); pb.style.display="none";
   setDirty(0);
 }

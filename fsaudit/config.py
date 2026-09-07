@@ -17,6 +17,16 @@ DEFAULT_COLUMNS = {
 DEFAULT_FORBIDDEN = ["AI生成", "免责声明"]
 DOC_EXTS = [".docx", ".doc"]   # 回链列只审这些扩展名的附件
 
+# 每条规则的启停开关（True=启用；False=跳过该规则的判罚）。可在管理面板独立配置。
+# 规则四/五由 LLM 判定，会产生 API 调用费用；规则一/二/三为本地确定性规则。
+DEFAULT_RULES_ENABLED = {
+    "r1": True,  # 规则一·AI 痕迹词（确定性）
+    "r2": True,  # 规则二·违禁词（确定性）
+    "r3": True,  # 规则三·关键词位置（确定性，我方须先于竞品出现）
+    "r4": True,  # 规则四·观点级主角性（LLM）
+    "r5": True,  # 规则五·AI 人味 & AI 收录友好度（LLM+启发式）
+}
+
 
 class LLMConfig(object):
     def __init__(self):
@@ -46,6 +56,8 @@ class AppConfig(object):
         self.llm = LLMConfig()
         self.columns = dict(DEFAULT_COLUMNS)
         self.forbidden_words = list(DEFAULT_FORBIDDEN)
+        # 每条审核规则的启停开关。False 时该规则直接跳过（不参与判罚）。
+        self.rules_enabled = dict(DEFAULT_RULES_ENABLED)
 
 
 def parse_spreadsheet_token(s):
@@ -89,6 +101,12 @@ def load_config(path=None):
             cfg.columns[k] = cols[k]
     if raw.get("forbidden_words"):
         cfg.forbidden_words = list(raw["forbidden_words"])
+    # 规则启停开关：未在 yaml 中给出的项保持默认（True）；显式 false 才关
+    rules_raw = raw.get("rules_enabled") or {}
+    if isinstance(rules_raw, dict):
+        for k, v in rules_raw.items():
+            if k in DEFAULT_RULES_ENABLED:
+                cfg.rules_enabled[k] = bool(v)
     return cfg
 
 
@@ -102,6 +120,7 @@ def save_config(cfg, path=None):
         "llm": cfg.llm.to_dict(),
         "columns": cfg.columns,
         "forbidden_words": cfg.forbidden_words,
+        "rules_enabled": cfg.rules_enabled,
     }
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)

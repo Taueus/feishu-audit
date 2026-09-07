@@ -188,6 +188,7 @@ def public_config():
         },
         "columns": cfg.columns,
         "forbidden_words": cfg.forbidden_words,
+        "rules_enabled": cfg.rules_enabled,
     }
 
 
@@ -220,7 +221,7 @@ def update_config(payload):
         cfg.llm.api_key = llm["api_key"].strip()
         notes.append("已更新 LLM API Key")
     if (llm.get("base_url") or llm.get("model")) and not cfg.llm.api_key:
-        notes.append("⚠ 当前未配置 API Key，LLM 深度审核不会启用")
+        notes.append("⚠ 当前未配置 API Key，规则四/五（LLM 判定）不会启用")
 
     # 3) 列名映射（可选）
     cols = payload.get("columns") or {}
@@ -240,6 +241,22 @@ def update_config(payload):
         if lst != cfg.forbidden_words:
             cfg.forbidden_words = lst
             notes.append("违禁词：%s" % "、".join(lst))
+
+    # 5) 各条规则的启停开关（每条规则独立可关）
+    rules_payload = payload.get("rules_enabled")
+    if isinstance(rules_payload, dict):
+        for k in cfg.rules_enabled.keys():
+            if k in rules_payload:
+                v = bool(rules_payload[k])
+                if v != cfg.rules_enabled[k]:
+                    cfg.rules_enabled[k] = v
+                    name = {"r1": "规则一·AI痕迹词", "r2": "规则二·违禁词",
+                            "r3": "规则三·关键词位置", "r4": "规则四·观点级主角性",
+                            "r5": "规则五·AI人味&收录友好度"}.get(k, k)
+                    notes.append("%s：%s" % (name, "启用" if v else "停用"))
+        # 开启 LLM 类规则却未配 key 时给出提醒
+        if (cfg.rules_enabled.get("r4") or cfg.rules_enabled.get("r5")) and not cfg.llm.api_key:
+            notes.append("⚠ 已开启 LLM 类规则但当前未配置 API Key，对应规则不会生效")
 
     try:
         save_config(cfg)
@@ -369,6 +386,11 @@ def main():
     st = bot_status()
     if st["running"]:
         print("[panel] 检测到 bot 已在运行 pid=%s（由面板认领管理）" % st["pid"], flush=True)
+    else:
+        # 开机自启场景：面板起来时自动拉起 bot（已配置 autostart_bot 才生效）
+        if os.environ.get("FEISHU_AUDIT_AUTOSTART_BOT", "0") == "1":
+            r = bot_start()
+            print("[panel] 开机自启 bot: %s" % r, flush=True)
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print("[panel] 运维面板已启动:  http://127.0.0.1:%d" % PORT, flush=True)
     try:

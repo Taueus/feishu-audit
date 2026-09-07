@@ -25,6 +25,8 @@ from .feishu import Feishu, FeishuError
 from .docparse import parse_doc, DocParseError
 from .llm import BrandIdentifier
 from .rules import load_ai_terms, load_brands, split_keywords, col_letter, audit_text
+from .viewpoint import ViewpointAuditor, format_issues
+from .ai_quality import AIQualityAuditor, format_hard_reasons, format_suggestions
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
@@ -48,6 +50,8 @@ class AuditEngine(object):
         os.makedirs(self.cache_dir, exist_ok=True)
         self.fs = Feishu(self.cfg.app_id, self.cfg.app_secret)
         self.identifier = BrandIdentifier(self.cfg.llm, cache_dir=self.cache_dir)
+        self.viewpoint = ViewpointAuditor(self.cfg.llm, cache_dir=self.cache_dir)
+        self.ai_quality = AIQualityAuditor(self.cfg.llm, cache_dir=self.cache_dir)
         self.log = setup_file_logging()
 
     # ------------------------------------------------ 列工作表
@@ -177,20 +181,58 @@ class AuditEngine(object):
                 competitors = [b for b in all_brands
                                if not any(b in k or k in b for k in keywords)]
 
-                res = audit_text(text, keywords, ai_terms, cfg.forbidden_words, competitors)
-                reason = "；".join(res["reasons"])
-                result_text = "通过" if res["passed"] else "不通过"
-                if res["passed"]:
+                res = audit_text(text, keywords, ai_terms, cfg.forbidden_words,
+                                 competitors, cfg.rules_enabled)
+                reasons = list(res["reasons"])
+                # 规则四 · 观点级主角性（LLM）：仅当前三条确定性规则通过、
+                # 我方关键词确在文中出现、识别到竞品、且规则四开关打开时调用
+                r4_on = cfg.rules_enabled.get("r4", True)
+                if (not reasons and competitors and r4_on
+                        and self.viewpoint.available()
+                        and any((k or "").strip() and k.lower() in text.lower() for k in keywords)):
+                    try:
+                        vp = self.viewpoint.audit(text, keywords, competitors)
+                        if vp.get("issues"):
+                            txt4 = format_issues(vp["issues"])
+                            if txt4:
+                                reasons.append("规则四：观点级主角性——%s" % txt4)
+                    except Exception as e:
+                        self.log.warning("规则四 LLM 判定失败（行%d），本规则跳过：%s",
+                                         row_no, e)
+                # 规则五 · AI 人味 & AI 收录友好度（LLM + 本地启发式）：
+                # 总开关由 cfg.rules_enabled["r5"] 控制；未配置 Key 时静默跳过。
+                # 仅在我方关键词确在文中出现时判定（无关键词则无可抽取断言可言）。
+                r5_on = cfg.rules_enabled.get("r5", True)
+                if (r5_on and self.ai_quality.available()
+                        and any((k or "").strip() and k.lower() in text.lower() for k in keywords)):
+                    try:
+                        aq = self.ai_quality.audit(text, keywords)
+                        # 硬性一票否决：理由前置到 reasons 头部，让作者先看硬伤
+                        if aq.get("hard_reasons"):
+                            hard_txt = format_hard_reasons(aq["hard_reasons"])
+                            reasons.insert(0, "规则五：%s" % hard_txt)
+                        # 收录建议：仅在原因为空（仍为通过）时附加，避免与硬性混排
+                        elif aq.get("suggestions"):
+                            sug_txt = format_suggestions(aq["suggestions"])
+                            if sug_txt:
+                                reasons.append("规则五·收录优化建议——%s" % sug_txt)
+                    except Exception as e:
+                        self.log.warning("规则五 LLM 判定失败（行%d），本规则跳过：%s",
+                                         row_no, e)
+                passed = not reasons
+                reason = "；".join(reasons)
+                result_text = "通过" if passed else "不通过"
+                if passed:
                     stat["pass"] += 1
                 else:
                     stat["fail"] += 1
                 self.log.info("[%s][行%d] %s -> %s %s", s["title"], row_no,
                               filename, result_text, reason)
                 results.append({"sheet": s["title"], "row": row_no, "file": filename,
-                                "kw": kw, "passed": res["passed"], "reasons": res["reasons"]})
+                                "kw": kw, "passed": passed, "reasons": reasons})
                 emit({"type": "row_done", "sheet": s["title"], "row": row_no,
-                      "file": filename, "kw": kw, "passed": res["passed"],
-                      "reasons": res["reasons"]})
+                      "file": filename, "kw": kw, "passed": passed,
+                      "reasons": reasons})
                 if c_res is not None:
                     writebacks.append((s["sheet_id"], s["title"], row_no,
                                        col_letter(c_res + 1),
