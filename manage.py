@@ -293,7 +293,8 @@ def update_config(payload):
                     name = {"r1": "规则一·AI痕迹词", "r2": "规则二·违禁词",
                             "r3": "规则三·关键词位置", "r4": "规则四·观点级主角性",
                             "r5": "规则五·AI人味&收录友好度",
-                            "r6": "规则六·广告法绝对化用语"}.get(k, k)
+                            "r6": "规则六·广告法绝对化用语",
+                            "r7": "规则七·FAQ问答结构"}.get(k, k)
                     notes.append("%s：%s" % (name, "启用" if v else "停用"))
         # 开启 LLM 类规则却未配 key 时给出提醒
         if (cfg.rules_enabled.get("r4") or cfg.rules_enabled.get("r5")) and not cfg.llm.api_key:

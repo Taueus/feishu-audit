@@ -66,6 +66,8 @@ forbidden_words: [AI生成, 免责声明]
 # r5 规则五·AI 人味 & AI 收录友好度（LLM+启发式，硬性一票否决 + 建议项）
 # r6 规则六·广告法绝对化用语（确定性，最强/最顶级/世界第一/NO.1 等极限词，
 #    词库在 wordbooks/absolute_terms.yaml，可自行增删，改完无需重启）
+# r7 规则七·FAQ 问答结构（确定性，文章含 FAQ 段落时须为英文 Q/A 问答结构，
+#    中文「问：/答：」、无问答结构、有 Q 无 A 均判不通过）
 # 也可在运维面板「审核规则启停」卡片切换。LLM 类规则需 llm.api_key 配置才生效。
 rules_enabled:
   r1: true
@@ -74,6 +76,7 @@ rules_enabled:
   r4: true
   r5: true
   r6: true
+  r7: true
 
 # ===== 审核速度（数据量大时调优）=====
 # 并发审核的文档数：多个文档并行处理（下载附件 + LLM 判定）。

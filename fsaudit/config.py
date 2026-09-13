@@ -30,6 +30,7 @@ DEFAULT_RULES_ENABLED = {
     "r4": True,  # 规则四·观点级主角性（LLM）
     "r5": True,  # 规则五·AI 人味 & AI 收录友好度（LLM+启发式）
     "r6": True,  # 规则六·广告法绝对化用语（确定性，wordbooks/absolute_terms.yaml）
+    "r7": True,  # 规则七·FAQ 问答结构（确定性，FAQ 段落须为英文 Q/A 问答）
 }
 
 
