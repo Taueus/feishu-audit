@@ -139,6 +139,10 @@
     padding:3px 9px;border-radius:999px}
   .c-badge.g{color:#9fecc9;background:rgba(47,213,143,.1);border:1px solid rgba(47,213,143,.28)}
   .c-badge.y{color:#ffce8d;background:rgba(255,180,84,.1);border:1px solid rgba(255,180,84,.28)}
+  .step{flex:none;display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;
+    padding:0 7px;border-radius:11px;font-size:11px;font-weight:800;font-family:var(--mono);
+    color:#8fd3ff;background:rgba(56,152,255,.13);border:1px solid rgba(56,152,255,.3)}
+  .step.alt{color:#c8d3e0;background:rgba(148,163,184,.1);border-color:rgba(148,163,184,.25);font-family:inherit}
   .c-body{margin-top:13px}
 
   /* ============ 表单 ============ */
@@ -397,13 +401,64 @@
   <!-- ===================== 配置卡片 ===================== -->
   <div class="grid">
 
+    <!-- ① 机器人应用凭证 -->
+    <div class="card span-12" id="botCard">
+      <div class="c-head">
+        <div class="c-ico"><svg><use href="#i-bot"/></svg></div>
+        <span class="step">1</span>
+        <div>
+          <div class="c-title">机器人应用凭证（飞书开放平台）</div>
+          <div class="c-sub">配置机器人身份：app_id / App Secret；改动后需重启机器人生效</div>
+        </div>
+        <span class="c-badge" id="appBadge" style="display:none"></span>
+      </div>
+      <div class="c-body">
+        <details id="appAcc">
+          <summary><svg class="chev"><use href="#i-chev"/></svg>应用凭证与云空间文件夹<span class="f-hint" style="display:inline;margin-left:8px">App ID · App Secret · 文件夹 token</span></summary>
+          <div class="acc-body" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;padding-top:12px">
+            <div class="field">
+              <div class="f-label"><svg><use href="#i-cpu"/></svg>App ID</div>
+              <input class="inp mono" id="appId" placeholder="cli_xxxxxxxxxxxxxxxx"
+                     autocomplete="off" spellcheck="false">
+              <div class="f-hint" id="appHint">飞书开放平台 → 应用详情 → 凭证与基础信息。留空则保持当前值。</div>
+            </div>
+            <div class="field">
+              <div class="f-label"><svg><use href="#i-key"/></svg>App Secret</div>
+              <div class="input-wrap">
+                <input class="inp mono" id="appSecret" type="password" placeholder="留空则保持已保存的 Secret"
+                       autocomplete="new-password" spellcheck="false" style="padding-right:38px">
+                <button class="eye" id="eyeSecretBtn" title="显示 / 隐藏"><svg><use href="#i-eye"/></svg></button>
+              </div>
+              <div class="f-hint" id="secretHint"></div>
+            </div>
+            <div class="field" style="grid-column:1 / -1">
+              <div class="f-label"><svg><use href="#i-link"/></svg>云空间文件夹（可选）</div>
+              <input class="inp mono" id="folderToken" placeholder="https://xxx.feishu.cn/drive/folder/… 或留空"
+                     autocomplete="off" spellcheck="false">
+              <div class="f-hint" id="folderHint">粘贴完整链接或裸 token；用于机器人有权限访问的文档目录。留空则保持当前。</div>
+            </div>
+            <div class="switch-row" style="grid-column:1 / -1">
+              <div class="tx"><b style="color:#ff8b95">清除已保存的 App Secret</b> — 换应用或排查凭证问题时使用（清除后机器人无法启动）</div>
+              <label class="switch"><input type="checkbox" id="clearSecret"><span class="slider"></span></label>
+            </div>
+            <div class="switch-row" style="grid-column:1 / -1">
+              <div class="tx"><b>清除云空间文件夹配置</b> — 不再绑定文件夹时使用</div>
+              <label class="switch"><input type="checkbox" id="clearFolder"><span class="slider"></span></label>
+            </div>
+            <div class="f-hint" id="botHint" style="grid-column:1 / -1"></div>
+          </div>
+        </details>
+      </div>
+    </div>
+
     <!-- 审核表格文档 -->
     <div class="card span-6" id="sheetCard">
       <div class="c-head">
         <div class="c-ico"><svg><use href="#i-file"/></svg></div>
+        <span class="step">2</span>
         <div>
           <div class="c-title">审核表格文档</div>
-          <div class="c-sub">粘贴完整链接或 token，可先测试再保存</div>
+          <div class="c-sub">指定审什么：粘贴完整链接或 token，可先测试再保存</div>
         </div>
         <span class="c-badge" id="docBadge" style="display:none"></span>
       </div>
@@ -427,9 +482,10 @@
     <div class="card span-6" id="llmCard">
       <div class="c-head">
         <div class="c-ico purple"><svg><use href="#i-cpu"/></svg></div>
+        <span class="step">3</span>
         <div>
           <div class="c-title">LLM 深度审核</div>
-          <div class="c-sub">AI 判断回链附件是否存在违规风险</div>
+          <div class="c-sub">怎么审（模型）：配置后启用规则四/五的 AI 判定；不填 Key 则纯规则</div>
         </div>
         <span class="c-badge" id="modeBadge" style="display:none"></span>
       </div>
@@ -459,57 +515,14 @@
       </div>
     </div>
 
-    <!-- 机器人应用凭证 -->
-    <div class="card span-12" id="botCard">
-      <div class="c-head">
-        <div class="c-ico"><svg><use href="#i-bot"/></svg></div>
-        <div>
-          <div class="c-title">机器人应用凭证（飞书开放平台）</div>
-          <div class="c-sub">app_id / App Secret 决定机器人身份；改动后需重启机器人生效</div>
-        </div>
-        <span class="c-badge" id="appBadge" style="display:none"></span>
-      </div>
-      <div class="c-body" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-        <div class="field">
-          <div class="f-label"><svg><use href="#i-cpu"/></svg>App ID</div>
-          <input class="inp mono" id="appId" placeholder="cli_xxxxxxxxxxxxxxxx"
-                 autocomplete="off" spellcheck="false">
-          <div class="f-hint" id="appHint">飞书开放平台 → 应用详情 → 凭证与基础信息。留空则保持当前值。</div>
-        </div>
-        <div class="field">
-          <div class="f-label"><svg><use href="#i-key"/></svg>App Secret</div>
-          <div class="input-wrap">
-            <input class="inp mono" id="appSecret" type="password" placeholder="留空则保持已保存的 Secret"
-                   autocomplete="new-password" spellcheck="false" style="padding-right:38px">
-            <button class="eye" id="eyeSecretBtn" title="显示 / 隐藏"><svg><use href="#i-eye"/></svg></button>
-          </div>
-          <div class="f-hint" id="secretHint"></div>
-        </div>
-        <div class="field" style="grid-column:1 / -1">
-          <div class="f-label"><svg><use href="#i-link"/></svg>云空间文件夹（可选）</div>
-          <input class="inp mono" id="folderToken" placeholder="https://xxx.feishu.cn/drive/folder/… 或留空"
-                 autocomplete="off" spellcheck="false">
-          <div class="f-hint" id="folderHint">粘贴完整链接或裸 token；用于机器人有权限访问的文档目录。留空则保持当前。</div>
-        </div>
-        <div class="switch-row" style="grid-column:1 / -1">
-          <div class="tx"><b style="color:#ff8b95">清除已保存的 App Secret</b> — 换应用或排查凭证问题时使用（清除后机器人无法启动）</div>
-          <label class="switch"><input type="checkbox" id="clearSecret"><span class="slider"></span></label>
-        </div>
-        <div class="switch-row" style="grid-column:1 / -1">
-          <div class="tx"><b>清除云空间文件夹配置</b> — 不再绑定文件夹时使用</div>
-          <label class="switch"><input type="checkbox" id="clearFolder"><span class="slider"></span></label>
-        </div>
-        <div class="f-hint" id="botHint" style="grid-column:1 / -1"></div>
-      </div>
-    </div>
-
     <!-- 审核规则启停（5 条规则独立开关） -->
     <div class="card span-12" id="rulesCard">
       <div class="c-head">
         <div class="c-ico green"><svg><use href="#i-bot"/></svg></div>
+        <span class="step">4</span>
         <div>
-          <div class="c-title">审核规则启停</div>
-          <div class="c-sub">每条规则可独立启用/停用；停用后该规则不参与判罚（规则四/五还省 LLM 调用）</div>
+          <div class="c-title">审核规则与违禁词</div>
+          <div class="c-sub">怎么审（判罚）：每条规则可独立启停；停用后不参与判罚（规则四/五还省 LLM 调用）</div>
         </div>
       </div>
       <div class="c-body">
@@ -548,6 +561,12 @@
           </div>
           <label class="switch"><input type="checkbox" id="ruleR5"><span class="slider"></span></label>
         </div>
+        <div class="field" style="margin-top:12px">
+          <div class="f-label"><svg><use href="#i-sliders"/></svg>违禁词列表（规则二 · 逗号分隔）</div>
+          <input class="inp" id="colForbidden" autocomplete="off" spellcheck="false"
+                 placeholder="AI生成, 免责声明">
+          <div class="f-hint">命中任一即不通过；留空保持当前。仅规则二启用时生效。</div>
+        </div>
         <div class="f-hint" id="rulesHint" style="margin-top:8px"></div>
       </div>
     </div>
@@ -556,9 +575,10 @@
     <div class="card span-6">
       <div class="c-head">
         <div class="c-ico amber"><svg><use href="#i-sliders"/></svg></div>
+        <span class="step alt">进阶</span>
         <div>
           <div class="c-title">表头列名映射</div>
-          <div class="c-sub">当新表格的表头叫法与默认不同时才需要调整</div>
+          <div class="c-sub">可选：仅当新表格的表头叫法与默认不同时才需要调整</div>
         </div>
         <span class="c-badge" id="colBadge" style="display:none"></span>
       </div>
@@ -581,10 +601,6 @@
             <div class="field">
               <div class="f-label">「不通过原因」列</div>
               <input class="inp" id="colReason" autocomplete="off">
-            </div>
-            <div class="field">
-              <div class="f-label">违禁词（逗号分隔）</div>
-              <input class="inp" id="colForbidden" autocomplete="off">
             </div>
           </div>
         </details>
@@ -837,6 +853,8 @@ function renderConfig(){
   $("botHint").textContent = appId
     ? "当前应用："+appId+"（改动凭证后务必「保存并重启」）"
     : "";
+  // 首次渲染决定凭证区默认展开/收起：凭证不完整 → 展开；已配好 → 收起（之后尊重用户手动操作）
+  if(!appAccInit && $("appAcc")){ $("appAcc").open = !(appId && secretSet); appAccInit = true; }
 
   // 占位符显示"当前值"（不改动输入中的 value）
   const ph = {
@@ -863,7 +881,7 @@ function renderConfig(){
 }
 
 /* ---------------- 状态轮询 ---------------- */
-let lastKey="";
+let lastKey="", appAccInit=false;
 async function refreshState(){
   try{
     const r = await fetch("/api/state",{cache:"no-store"});
