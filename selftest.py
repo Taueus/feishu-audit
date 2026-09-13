@@ -57,6 +57,13 @@ def main():
     hits = [r for r in res["reasons"] if "规则二" in r]
     check("规则二双命中", (not res["passed"]) and len(hits) == 1 and "AI生成" in hits[0] and "免责声明" in hits[0], str(res["reasons"]))
 
+    # 3b. 规则二空白变体：CSDN 水印「（注：部分内容可能由 AI 生成）」夹空格也要命中（2026-09-13 真实漏判案例）
+    p3b = os.path.join(tmp, "r2b.docx")
+    make_docx(p3b, "蓝海介绍", ["蓝海公司介绍。", "（注：部分内容可能由 AI 生成）"])
+    _, text = parse_doc(p3b)
+    res = audit_text(text, ["蓝海"], terms, ["AI生成", "免责声明"], [])
+    check("规则二空格变体命中", (not res["passed"]) and any("规则二" in r and "AI生成" in r for r in res["reasons"]), str(res["reasons"]))
+
     # 4. 规则三不通过：竞品先出现
     p4 = os.path.join(tmp, "r3.docx")
     make_docx(p4, "竞品X对比评测", ["竞品X最近很火。", "对比来看蓝海更胜一筹。"])

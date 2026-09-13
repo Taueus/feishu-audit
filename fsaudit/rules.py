@@ -68,14 +68,22 @@ def split_keywords(cell):
     return parts or [cell]
 
 
+def _squash(s):
+    """去掉空格/制表符/全角空格（保留换行），用于空白不敏感匹配。
+
+    现实案例：CSDN 平台水印「（注：部分内容可能由 AI 生成）」在 AI 与生成
+    之间夹了空格，普通子串匹配会漏判；压掉空白后即可命中「AI生成」。"""
+    return re.sub(r"[ \t\u3000]+", "", s or "")
+
+
 def rule1_hits(text, terms):
-    t = (text or "").lower()
-    return [term for term in terms if term.lower() in t]
+    t = _squash(text).lower()
+    return [term for term in terms if _squash(term).lower() in t]
 
 
 def rule2_hits(text, words):
-    t = (text or "").lower()
-    return [w for w in words if w.lower() in t]
+    t = _squash(text).lower()
+    return [w for w in words if _squash(w).lower() in t]
 
 
 # 规则六命中展示上限（防止极端文章刷屏）
@@ -88,10 +96,10 @@ def rule6_hits(text, terms, patterns):
     命中去重 + 子串折叠：某命中被另一命中完整包含时只报较长者
     （如命中「最顶级」时不再重复报「顶级」）。"""
     t = text or ""
-    low = t.lower()
+    low = _squash(t).lower()
     hits = set()
     for w in terms:
-        if w.lower() in low:
+        if _squash(w).lower() in low:
             hits.add(w)
     for p in patterns:
         try:
