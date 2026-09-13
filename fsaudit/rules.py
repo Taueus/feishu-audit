@@ -227,10 +227,45 @@ def rule6_hits(text, terms, patterns):
 # 用于缩写回退匹配，如「科洛百KLB」拆出 [科洛百, KLB]，文中只写 KLB 也算命中。
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]{2,}|[\u4e00-\u9fff]{2,}")
 
+# 组织/行业后缀：关键词常写成「核心品牌+后缀」（宜品集团、宋城演艺、华东医药），
+# 而文章里往往只出现「宜品怡贝」「杭州宋城」这类核心品牌变体。
+# 剥离后缀得到核心品牌词（宜品、宋城），参与 token 匹配与我方判定。
+_ORG_SUFFIXES = (
+    "有限公司", "责任公司", "股份公司", "控股集团", "有限",
+    "集团", "控股", "股份", "公司",
+    "智能科技", "信息技术", "网络科技", "科技", "互联网", "网络", "通信", "软件",
+    "文化", "传媒", "传播", "演艺", "影业", "文旅", "旅游",
+    "实业", "生物", "医药", "制药", "食品", "乳业", "饮品",
+    "电器", "电子", "家居", "服饰", "服装", "美妆", "日化",
+    "新能源", "汽车", "教育", "咨询", "餐饮", "酒店", "农业",
+)
+
+
+def _strip_org_suffix(tok):
+    """迭代剥离组织后缀，返回核心品牌词（可能 <2 字，由调用方过滤）"""
+    t = tok
+    while True:
+        for suf in _ORG_SUFFIXES:
+            if t.endswith(suf) and len(t) - len(suf) >= 2:
+                t = t[:-len(suf)]
+                break
+        else:
+            return t
+
 
 def keyword_tokens(name):
-    """把关键词/品牌名拆成 token（中文连续段 + 拉丁字母数字段）"""
-    return _TOKEN_RE.findall(name or "")
+    """把关键词/品牌名拆成 token（中文连续段 + 拉丁字母数字段 + 核心品牌词）。
+
+    核心品牌词 = 中文 token 迭代剥离组织后缀后的剩余部分（≥2字才保留），
+    如「宋城演艺」→ [宋城演艺, 宋城]、「宜品集团」→ [宜品集团, 宜品]。"""
+    out = []
+    for tk in _TOKEN_RE.findall(name or ""):
+        if tk not in out:
+            out.append(tk)
+        core = _strip_org_suffix(tk)
+        if len(core) >= 2 and core != tk and core not in out:
+            out.append(core)
+    return out
 
 
 def _tok_related(a, b):
