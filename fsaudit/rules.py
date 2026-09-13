@@ -68,22 +68,74 @@ def split_keywords(cell):
     return parts or [cell]
 
 
-def _squash(s):
-    """去掉空格/制表符/全角空格（保留换行），用于空白不敏感匹配。
+# ---------------------------------------------------------------- 词匹配防变形
+# 背景：CSDN 平台水印「（注：部分内容可能由 AI 生成）」在 AI 与生成之间夹空格，
+# 曾导致违禁词「AI生成」漏判（2026-09-13 真实案例）。词匹配统一走双层检测：
+#   第一层（快路径）：NFKC 全角转半角 + 大小写折叠 + 去掉所有空白和零宽字符后做子串匹配
+#     —— 挡住空格/换行/全角（ＡＩ）/零宽空格等隐形变形
+#   第二层（容错正则）：词内相邻字符之间允许 0~2 个「软分隔符」（- · _ 、，/ 等标点）
+#     —— 挡住「AI-生成」「AI·生成」等插标点写法
+#   不允许句末标点（。！？）且分隔符≤2个，避免「……AI。下一句：生成……」跨句误报。
+# 规则三的关键词匹配不走此逻辑（保持严格，避免短 token 误伤）。
+import unicodedata
 
-    现实案例：CSDN 平台水印「（注：部分内容可能由 AI 生成）」在 AI 与生成
-    之间夹了空格，普通子串匹配会漏判；压掉空白后即可命中「AI生成」。"""
-    return re.sub(r"[ \t\u3000]+", "", s or "")
+_WS_ZW_RE = re.compile(r"[\s\u200b\u200c\u200d\u2060\ufeff\u00ad]+")
+# 软分隔符：空白、零宽、连接/装饰类标点（不含句末标点。！？!?）
+_SOFT_SEP = (r"[\s\u200b\u200c\u200d\u2060\ufeff\u00ad"
+             r"·•・‧﹒\-＿_~～\*#&/\\|｜、，,．.:：;；'’\"”"
+             r"「」『』()\[\]【】〈〉《》]{0,2}")
+
+_TERM_RX_CACHE = {}
+
+
+def _fold(s):
+    """NFKC 全角转半角 + 大小写折叠"""
+    try:
+        return unicodedata.normalize("NFKC", s or "").casefold()
+    except Exception:
+        return (s or "").lower()
+
+
+def _term_regex(term):
+    """把词编译成「字符间允许 0~2 个软分隔符」的容错正则（带缓存）"""
+    key = _WS_ZW_RE.sub("", _fold(term))
+    if not key:
+        return None
+    rx = _TERM_RX_CACHE.get(key)
+    if rx is None:
+        rx = re.compile(_SOFT_SEP.join(re.escape(c) for c in key))
+        _TERM_RX_CACHE[key] = rx
+    return rx
+
+
+def term_hits(text, terms):
+    """规则一/二/六通用：返回 terms 中在 text 里命中的词（按原词形返回）。
+
+    双层检测：归一化子串快路径 + 分隔符容错正则。"""
+    if not terms or not text:
+        return []
+    tf = _fold(text)
+    tn = _WS_ZW_RE.sub("", tf)
+    out = []
+    for term in terms:
+        key = _WS_ZW_RE.sub("", _fold(term))
+        if not key:
+            continue
+        if key in tn:
+            out.append(term)
+            continue
+        rx = _term_regex(term)
+        if rx and rx.search(tf):
+            out.append(term)
+    return out
 
 
 def rule1_hits(text, terms):
-    t = _squash(text).lower()
-    return [term for term in terms if _squash(term).lower() in t]
+    return term_hits(text, terms)
 
 
 def rule2_hits(text, words):
-    t = _squash(text).lower()
-    return [w for w in words if _squash(w).lower() in t]
+    return term_hits(text, words)
 
 
 # 规则六命中展示上限（防止极端文章刷屏）
@@ -92,23 +144,22 @@ ABSOLUTE_DISPLAY_CAP = 10
 
 def rule6_hits(text, terms, patterns):
     """广告法绝对化用语命中检测。
-    terms 走子串匹配（不区分大小写），patterns 走正则匹配；
+    terms 走 term_hits 双层匹配（防空白/全角/插标点变形），patterns 走正则匹配
+    （在原文和 NFKC 归一化文本上各跑一遍，挡全角数字/字母变形）；
     命中去重 + 子串折叠：某命中被另一命中完整包含时只报较长者
     （如命中「最顶级」时不再重复报「顶级」）。"""
     t = text or ""
-    low = _squash(t).lower()
-    hits = set()
-    for w in terms:
-        if _squash(w).lower() in low:
-            hits.add(w)
+    tf = unicodedata.normalize("NFKC", t)
+    hits = set(term_hits(t, terms))
     for p in patterns:
-        try:
-            for m in re.finditer(p, t):
-                s = m.group(0).strip()
-                if s:
-                    hits.add(s)
-        except re.error:
-            continue  # 词库里的非法正则直接跳过，不炸审核
+        for src in (t, tf):
+            try:
+                for m in re.finditer(p, src):
+                    s = m.group(0).strip()
+                    if s:
+                        hits.add(s)
+            except re.error:
+                continue  # 词库里的非法正则直接跳过，不炸审核
     out = [h for h in hits if not any(h != k and h in k for k in hits)]
     out.sort(key=len, reverse=True)
     return out
