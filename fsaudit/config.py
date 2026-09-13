@@ -8,6 +8,10 @@ import yaml
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.yaml")
 
+# 行级并发审核的默认/上限（多行文档并行下载+调用 LLM）
+DEFAULT_CONCURRENCY = 4
+MAX_CONCURRENCY = 16
+
 DEFAULT_COLUMNS = {
     "keyword": "项目",      # 我方关键词（多个）
     "link": "回链",        # 文档附件列（只审 .doc/.docx 附件，其他链接/空值跳过）
@@ -58,6 +62,8 @@ class AppConfig(object):
         self.forbidden_words = list(DEFAULT_FORBIDDEN)
         # 每条审核规则的启停开关。False 时该规则直接跳过（不参与判罚）。
         self.rules_enabled = dict(DEFAULT_RULES_ENABLED)
+        # 行级并发数：多行文档并行处理（下载+LLM），1=串行（旧行为）
+        self.concurrency = DEFAULT_CONCURRENCY
 
 
 def parse_spreadsheet_token(s):
@@ -107,6 +113,12 @@ def load_config(path=None):
         for k, v in rules_raw.items():
             if k in DEFAULT_RULES_ENABLED:
                 cfg.rules_enabled[k] = bool(v)
+    # 行级并发数：clamp 到 [1, MAX_CONCURRENCY]
+    try:
+        cfg.concurrency = int(raw.get("concurrency", DEFAULT_CONCURRENCY) or 1)
+    except (TypeError, ValueError):
+        cfg.concurrency = DEFAULT_CONCURRENCY
+    cfg.concurrency = max(1, min(cfg.concurrency, MAX_CONCURRENCY))
     return cfg
 
 
@@ -121,6 +133,7 @@ def save_config(cfg, path=None):
         "columns": cfg.columns,
         "forbidden_words": cfg.forbidden_words,
         "rules_enabled": cfg.rules_enabled,
+        "concurrency": cfg.concurrency,
     }
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)

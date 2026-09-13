@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 
 import requests
 
@@ -29,6 +30,7 @@ class BrandIdentifier(object):
         os.makedirs(cache_dir, exist_ok=True)
         self.cache_path = os.path.join(cache_dir, "brand_cache.json")
         self._cache = {}
+        self._lock = threading.Lock()   # 并发审核时保护缓存读写
         if os.path.exists(self.cache_path):
             try:
                 with open(self.cache_path, "r", encoding="utf-8") as f:
@@ -57,8 +59,9 @@ class BrandIdentifier(object):
         if not self.available():
             return []
         key = hashlib.md5(text.encode("utf-8")).hexdigest()
-        if key in self._cache:
-            return list(self._cache[key])
+        with self._lock:
+            if key in self._cache:
+                return list(self._cache[key])
         content = self._chat([
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": text[:60000]},
@@ -67,12 +70,13 @@ class BrandIdentifier(object):
         if not m:
             raise RuntimeError("LLM 返回无法解析为JSON数组：%s" % content[:200])
         brands = [str(b).strip() for b in json.loads(m.group(0)) if str(b).strip()]
-        self._cache[key] = brands
-        try:
-            with open(self.cache_path, "w", encoding="utf-8") as f:
-                json.dump(self._cache, f, ensure_ascii=False)
-        except OSError:
-            pass
+        with self._lock:
+            self._cache[key] = brands
+            try:
+                with open(self.cache_path, "w", encoding="utf-8") as f:
+                    json.dump(self._cache, f, ensure_ascii=False)
+            except OSError:
+                pass
         return list(brands)
 
     def selfcheck(self):

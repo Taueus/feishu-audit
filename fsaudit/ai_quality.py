@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 
 import requests
 
@@ -92,6 +93,7 @@ class AIQualityAuditor(object):
         os.makedirs(cache_dir, exist_ok=True)
         self.cache_path = os.path.join(cache_dir, "ai_quality_cache.json")
         self._cache = {}
+        self._lock = threading.Lock()   # 并发审核时保护缓存读写
         if os.path.exists(self.cache_path):
             try:
                 with open(self.cache_path, "r", encoding="utf-8") as f:
@@ -128,10 +130,11 @@ class AIQualityAuditor(object):
                     "suggestions": [], "skipped": True}
 
         key = hashlib.md5(text.encode("utf-8")).hexdigest()
-        hit = self._cache.get(key)
-        if (hit and hit.get("v") == CACHE_VERSION
-                and hit.get("kw") == list(keywords)):
-            return hit["result"]
+        with self._lock:
+            hit = self._cache.get(key)
+            if (hit and hit.get("v") == CACHE_VERSION
+                    and hit.get("kw") == list(keywords)):
+                return hit["result"]
 
         prompt = PROMPT_TPL.format(
             keywords="、".join(keywords) or "（未提供）",
@@ -154,12 +157,13 @@ class AIQualityAuditor(object):
                                    data.get("ai_tone_heavy") or False)
         result = {"hard_fail": hard_fail, "hard_reasons": hard_reasons,
                   "suggestions": suggestions, "skipped": False}
-        self._cache[key] = {"v": CACHE_VERSION, "kw": list(keywords), "result": result}
-        try:
-            with open(self.cache_path, "w", encoding="utf-8") as f:
-                json.dump(self._cache, f, ensure_ascii=False)
-        except OSError:
-            pass
+        with self._lock:
+            self._cache[key] = {"v": CACHE_VERSION, "kw": list(keywords), "result": result}
+            try:
+                with open(self.cache_path, "w", encoding="utf-8") as f:
+                    json.dump(self._cache, f, ensure_ascii=False)
+            except OSError:
+                pass
         return result
 
     @staticmethod

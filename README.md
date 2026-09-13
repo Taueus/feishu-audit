@@ -195,7 +195,12 @@ cp config.example.yaml config.yaml    # Windows: copy config.example.yaml config
 | `columns.reason` | ✅ | 「不通过原因」回写列表头 |
 | `forbidden_words` | — | 规则二违禁词列表 |
 | `rules_enabled.r1..r5` | — | 五条规则各自独立开关（默认全 `true`；显式 `false` 才关）。面板「审核规则启停」卡片可切 |
+| `concurrency` | — | 并发审核数（1-16，默认 4）：多个文档并行下载+LLM 判定。面板 LLM 卡片可改，重启机器人后生效 |
 | `llm.*`（配置后） | — | 规则四（观点级主角性）、规则五（AI 人味 & 收录友好度）依赖 LLM，未配置 Key 时自动跳过 |
+
+> 🚀 **审核提速（已内置，无需配置）**：① 行级并发（`concurrency`，默认 4 路）；② 附件按
+> `file_token` 本地缓存，重审/强制重审免重复下载；③ LLM 判定结果按正文 md5 缓存，重审零调用；
+> ④ 回写走飞书 batch_update 批量接口（单请求最多 500 格，替代逐格写入）。
 
 > ⚠️ **表头名必须与目标表格实际一致**；换表格时如新表表头叫法不同，要同步改 `columns`。
 

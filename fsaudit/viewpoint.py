@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 
 import requests
 
@@ -77,6 +78,7 @@ class ViewpointAuditor(object):
         os.makedirs(cache_dir, exist_ok=True)
         self.cache_path = os.path.join(cache_dir, "viewpoint_cache.json")
         self._cache = {}
+        self._lock = threading.Lock()   # 并发审核时保护缓存读写
         if os.path.exists(self.cache_path):
             try:
                 with open(self.cache_path, "r", encoding="utf-8") as f:
@@ -105,10 +107,11 @@ class ViewpointAuditor(object):
         if not self.available():
             return {"pass": True, "issues": [], "skipped": True}
         key = hashlib.md5(text.encode("utf-8")).hexdigest()
-        hit = self._cache.get(key)
-        if (hit and hit.get("v") == CACHE_VERSION
-                and hit.get("kw") == list(keywords)):
-            return {"pass": not hit["issues"], "issues": hit["issues"]}
+        with self._lock:
+            hit = self._cache.get(key)
+            if (hit and hit.get("v") == CACHE_VERSION
+                    and hit.get("kw") == list(keywords)):
+                return {"pass": not hit["issues"], "issues": hit["issues"]}
         prompt = PROMPT_TPL.format(
             keywords="、".join(keywords) or "（未提供）",
             competitors="、".join(competitors[:60]) or "（无）",
@@ -119,13 +122,14 @@ class ViewpointAuditor(object):
         ])
         data = self._parse(content)
         issues = judge(data.get("blocks") or [], list(keywords))
-        self._cache[key] = {"v": CACHE_VERSION, "kw": list(keywords),
-                            "issues": issues}
-        try:
-            with open(self.cache_path, "w", encoding="utf-8") as f:
-                json.dump(self._cache, f, ensure_ascii=False)
-        except OSError:
-            pass
+        with self._lock:
+            self._cache[key] = {"v": CACHE_VERSION, "kw": list(keywords),
+                                "issues": issues}
+            try:
+                with open(self.cache_path, "w", encoding="utf-8") as f:
+                    json.dump(self._cache, f, ensure_ascii=False)
+            except OSError:
+                pass
         return {"pass": not issues, "issues": issues}
 
     @staticmethod

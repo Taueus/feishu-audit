@@ -191,6 +191,7 @@ def public_config():
         "columns": cfg.columns,
         "forbidden_words": cfg.forbidden_words,
         "rules_enabled": cfg.rules_enabled,
+        "concurrency": cfg.concurrency,
     }
 
 
@@ -296,6 +297,19 @@ def update_config(payload):
         # 开启 LLM 类规则却未配 key 时给出提醒
         if (cfg.rules_enabled.get("r4") or cfg.rules_enabled.get("r5")) and not cfg.llm.api_key:
             notes.append("⚠ 已开启 LLM 类规则但当前未配置 API Key，对应规则不会生效")
+
+    # 6) 并发审核数（1-16；数据量大时调高可提速，过高可能触发 LLM 限流）
+    conc = payload.get("concurrency")
+    if conc not in (None, ""):
+        try:
+            n = int(conc)
+        except (TypeError, ValueError):
+            return {"ok": False, "msg": "并发数必须是 1-16 的整数"}
+        if not 1 <= n <= 16:
+            return {"ok": False, "msg": "并发数必须在 1-16 之间"}
+        if n != cfg.concurrency:
+            notes.append("并发审核数：%d → %d（重启机器人后生效）" % (cfg.concurrency, n))
+            cfg.concurrency = n
 
     try:
         save_config(cfg)

@@ -7,17 +7,24 @@
     run = engine.run(sheet_ids, dry_run, force, on_event=cb)
     engine.write_back(run, on_event=cb)
 
-事件(on_event 回调参数，均为 dict):
+事件(on_event 回调参数，均为 dict; 并发模式下回调来自工作线程，需自行保证线程安全):
     {"type": "log",         "msg": str}
     {"type": "sheet_start", "sheet": str}
     {"type": "sheet_docs",  "sheet": str, "total": int}
     {"type": "row_start",   "sheet": str, "row": int, "file": str, "index": int, "total": int}
     {"type": "row_done",    "sheet": str, "row": int, "file": str, "kw": str,
                             "passed": bool, "reasons": [str]}
+
+性能设计（数据量大时的提速手段）:
+    1. 行级并发：cfg.concurrency 个文档并行处理（下载+解析+LLM），默认 4，1=串行
+    2. 下载缓存：附件按 file_token 命名落盘，已存在即跳过下载（重审/force 免下载）
+    3. LLM 结果缓存：md5(正文) 命中则零调用（原有机制，缓存文件读写已加锁）
+    4. 批量回写：飞书 batch_update 一次请求最多写 500 个 range，替代逐格调用
 """
 import logging
 import os
-import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 
 from .config import AppConfig, load_config, DOC_EXTS
@@ -144,29 +151,41 @@ class AuditEngine(object):
                 continue
 
             emit({"type": "sheet_docs", "sheet": s["title"], "total": len(todo)})
-            for idx, (row_no, kw, doc_atts) in enumerate(todo, 1):
+            base_results, base_wb = len(results), len(writebacks)
+
+            # ------- 单行审核（线程安全：可在工作线程中运行） -------
+            agg_lock = threading.Lock()   # 保护 stat/results/writebacks 聚合
+
+            def audit_row(row_no, kw, doc_atts, idx):
                 file_token, filename = doc_atts[0]
                 emit({"type": "row_start", "sheet": s["title"], "row": row_no,
                       "file": filename, "index": idx, "total": len(todo)})
                 keywords = split_keywords(kw)
-                local = os.path.join(self.cache_dir, "%s_%s" % (s["sheet_id"], filename))
+                # 下载缓存：以 file_token 命名，命中即跳过下载（附件 token 不可变，安全）
+                local = os.path.join(self.cache_dir, "%s_%s" % (file_token, filename))
                 try:
-                    self.fs.download(file_token, local)
+                    if not os.path.exists(local):
+                        self.fs.download(file_token, local)
                     title, content = parse_doc(local)
                 except (FeishuError, DocParseError) as e:
-                    stat["error"] += 1
-                    reasons = ["文档下载或解析失败：%s" % e]
-                    self.log.error("[%s][行%d] %s 下载/解析失败 %s", s["title"], row_no, filename, e)
-                    results.append({"sheet": s["title"], "row": row_no, "file": filename,
-                                    "kw": kw, "passed": False, "reasons": reasons})
+                    with agg_lock:
+                        stat["error"] += 1
+                        reasons = ["文档下载或解析失败：%s" % e]
+                        self.log.error("[%s][行%d] %s 下载/解析失败 %s",
+                                       s["title"], row_no, filename, e)
+                        results.append({"sheet": s["title"], "row": row_no,
+                                        "file": filename, "kw": kw,
+                                        "passed": False, "reasons": reasons})
                     emit({"type": "row_done", "sheet": s["title"], "row": row_no,
-                          "file": filename, "kw": kw, "passed": False, "reasons": reasons})
+                          "file": filename, "kw": kw, "passed": False,
+                          "reasons": reasons})
                     if c_res is not None:
-                        writebacks.append((s["sheet_id"], s["title"], row_no,
-                                           col_letter(c_res + 1),
-                                           col_letter(c_reason + 1) if c_reason is not None else None,
-                                           "不通过", "；".join(reasons)))
-                    continue
+                        with agg_lock:
+                            writebacks.append((s["sheet_id"], s["title"], row_no,
+                                               col_letter(c_res + 1),
+                                               col_letter(c_reason + 1) if c_reason is not None else None,
+                                               "不通过", "；".join(reasons)))
+                    return
 
                 text = (title + "\n" + content).strip() if title else content
 
@@ -222,22 +241,47 @@ class AuditEngine(object):
                 passed = not reasons
                 reason = "；".join(reasons)
                 result_text = "通过" if passed else "不通过"
-                if passed:
-                    stat["pass"] += 1
-                else:
-                    stat["fail"] += 1
-                self.log.info("[%s][行%d] %s -> %s %s", s["title"], row_no,
-                              filename, result_text, reason)
-                results.append({"sheet": s["title"], "row": row_no, "file": filename,
-                                "kw": kw, "passed": passed, "reasons": reasons})
+                with agg_lock:
+                    if passed:
+                        stat["pass"] += 1
+                    else:
+                        stat["fail"] += 1
+                    self.log.info("[%s][行%d] %s -> %s %s", s["title"], row_no,
+                                  filename, result_text, reason)
+                    results.append({"sheet": s["title"], "row": row_no,
+                                    "file": filename, "kw": kw,
+                                    "passed": passed, "reasons": reasons})
+                    if c_res is not None:
+                        writebacks.append((s["sheet_id"], s["title"], row_no,
+                                           col_letter(c_res + 1),
+                                           col_letter(c_reason + 1) if c_reason is not None else None,
+                                           result_text, reason))
                 emit({"type": "row_done", "sheet": s["title"], "row": row_no,
                       "file": filename, "kw": kw, "passed": passed,
                       "reasons": reasons})
-                if c_res is not None:
-                    writebacks.append((s["sheet_id"], s["title"], row_no,
-                                       col_letter(c_res + 1),
-                                       col_letter(c_reason + 1) if c_reason is not None else None,
-                                       result_text, reason))
+
+            # ------- 行级并发调度 -------
+            workers = max(1, int(getattr(cfg, "concurrency", 1) or 1))
+            if workers > 1 and len(todo) > 1:
+                emit({"type": "log", "msg": "[%s] 并发审核 %d 路（共 %d 个文档）"
+                      % (s["title"], min(workers, len(todo)), len(todo))})
+                with ThreadPoolExecutor(
+                        max_workers=min(workers, len(todo)),
+                        thread_name_prefix="audit") as ex:
+                    futs = [ex.submit(audit_row, row_no, kw, atts, idx)
+                            for idx, (row_no, kw, atts) in enumerate(todo, 1)]
+                    for fut in as_completed(futs):
+                        fut.result()   # worker 内已兜底业务异常；这里只为暴露意外错误
+            else:
+                for idx, (row_no, kw, atts) in enumerate(todo, 1):
+                    audit_row(row_no, kw, atts, idx)
+
+            # 并发完成顺序不定：按行号重排本表新增片段，保证结果卡片与回写顺序稳定
+            with agg_lock:
+                results[base_results:] = sorted(results[base_results:],
+                                                 key=lambda r: r["row"])
+                writebacks[base_wb:] = sorted(writebacks[base_wb:],
+                                              key=lambda w: w[2])
 
         return {"dry_run": dry_run, "stat": stat, "results": results,
                 "writebacks": writebacks}
@@ -245,20 +289,56 @@ class AuditEngine(object):
     # ------------------------------------------------ 回写
 
     def write_back(self, run, on_event=None):
-        """把 run 中的待回写结果写入飞书表格，返回 {ok, failures}"""
+        """把 run 中的待回写结果写入飞书表格，返回 {ok, failures}
+
+        性能：优先走飞书 batch_update 批量接口（一次请求最多 500 个 range），
+        整批失败时回退为逐格写入，兼容旧链路。
+        """
         emit = on_event or (lambda ev: None)
         token = self.cfg.spreadsheet_token
         ok, failures = 0, []
-        for sheet_id, title, row_no, res_letter, reason_letter, result_text, reason in run["writebacks"]:
+
+        # 组装按行分组的写入项：一行 = 结果格 +（可选）原因格
+        rows = []
+        for sheet_id, title, row_no, res_letter, reason_letter, result_text, reason \
+                in run["writebacks"]:
+            cells = [(sheet_id, res_letter + str(row_no), result_text)]
+            if reason_letter:
+                cells.append((sheet_id, reason_letter + str(row_no), reason or ""))
+            rows.append({"sheet_id": sheet_id, "title": title, "row": row_no,
+                         "cells": cells})
+
+        # 分批：每批累计不超过 500 个 range（飞书单请求上限），行不跨批
+        BATCH_RANGE_LIMIT = 500
+        i = 0
+        while i < len(rows):
+            group, ncells = [], 0
+            while i < len(rows) and (not group or
+                                     ncells + len(rows[i]["cells"]) <= BATCH_RANGE_LIMIT):
+                group.append(rows[i])
+                ncells += len(rows[i]["cells"])
+                i += 1
+            flat = [(c[0], c[1], c[2]) for r in group for c in r["cells"]]
             try:
-                self.fs.write_cell(token, sheet_id, res_letter + str(row_no), result_text)
-                if reason_letter:
-                    self.fs.write_cell(token, sheet_id, reason_letter + str(row_no), reason or "")
-                ok += 1
-                emit({"type": "log", "msg": "已回写 [%s 行%d] %s" % (title, row_no, result_text)})
+                self.fs.write_batch(token, flat, chunk=BATCH_RANGE_LIMIT)
+                ok += len(group)
+                for r in group:
+                    emit({"type": "log", "msg": "已回写 [%s 行%d]"
+                          % (r["title"], r["row"])})
             except FeishuError as e:
-                failures.append({"sheet": title, "row": row_no, "error": str(e)})
-                emit({"type": "log", "msg": "回写失败 [%s 行%d]：%s" % (title, row_no, e)})
-                break
-            time.sleep(0.15)
+                # 整批失败：回退逐行写入（保持行级原子性——结果与原因要么都写要么都不写）
+                for r in group:
+                    try:
+                        for sheet_id, a1, v in r["cells"]:
+                            self.fs.write_cell(token, sheet_id, a1, v)
+                        ok += 1
+                        emit({"type": "log", "msg": "已回写 [%s 行%d]"
+                              % (r["title"], r["row"])})
+                    except FeishuError as e2:
+                        failures.append({"sheet": r["title"], "row": r["row"],
+                                         "error": str(e2)})
+                        emit({"type": "log", "msg": "回写失败 [%s 行%d]：%s"
+                              % (r["title"], r["row"], e2)})
+        if failures:
+            emit({"type": "log", "msg": "提示：请确认应用对表格有「可编辑」权限"})
         return {"ok": ok, "failures": failures}

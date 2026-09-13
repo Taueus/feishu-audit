@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """飞书开放平台 API 封装：认证 / Sheets / Drive"""
+import threading
 import time
 
 import requests
@@ -29,20 +30,23 @@ class Feishu(object):
         self.app_secret = app_secret
         self._token = ""
         self._expire = 0.0
+        self._token_lock = threading.Lock()
 
     # ---------- 基础 ----------
     def token(self):
-        if time.time() < self._expire - 120:
+        # 并发审核时多个工作线程会同时取 token：加锁避免并发重复刷新
+        with self._token_lock:
+            if time.time() < self._expire - 120:
+                return self._token
+            r = requests.post(BASE + "/auth/v3/tenant_access_token/internal",
+                              json={"app_id": self.app_id, "app_secret": self.app_secret},
+                              timeout=TIMEOUT)
+            data = r.json()
+            if data.get("code") != 0:
+                raise FeishuError("获取 tenant_access_token 失败：%s" % data.get("msg"))
+            self._token = data["tenant_access_token"]
+            self._expire = time.time() + int(data.get("expire", 7200))
             return self._token
-        r = requests.post(BASE + "/auth/v3/tenant_access_token/internal",
-                          json={"app_id": self.app_id, "app_secret": self.app_secret},
-                          timeout=TIMEOUT)
-        data = r.json()
-        if data.get("code") != 0:
-            raise FeishuError("获取 tenant_access_token 失败：%s" % data.get("msg"))
-        self._token = data["tenant_access_token"]
-        self._expire = time.time() + int(data.get("expire", 7200))
-        return self._token
 
     def _headers(self):
         return {"Authorization": "Bearer " + self.token()}
@@ -143,6 +147,26 @@ class Feishu(object):
         url = BASE + "/sheets/v2/spreadsheets/%s/values" % spreadsheet_token
         body = {"valueRange": {"range": "%s!%s" % (sheet_id, a1), "values": [[value]]}}
         self._put(url, body)
+
+    def write_batch(self, spreadsheet_token, items, chunk=500):
+        """批量写入多个单元格，返回成功写入的 item 数。
+
+        items: [(sheet_id, a1, value), ...]；a1 为单格简写（如 'C5'）。
+        单次请求最多 chunk 个 range（飞书上限 500）；整批失败抛 FeishuError。
+        """
+        done = 0
+        url = BASE + "/sheets/v2/spreadsheets/%s/values/batch_update" % spreadsheet_token
+        for i in range(0, len(items), chunk):
+            part = items[i:i + chunk]
+            ranges = []
+            for sheet_id, a1, value in part:
+                if ":" not in a1:
+                    a1 = a1 + ":" + a1
+                ranges.append({"range": "%s!%s" % (sheet_id, a1),
+                               "values": [[value]]})
+            self._put(url, {"valueRanges": ranges})
+            done += len(part)
+        return done
 
     # ---------- 云空间 ----------
     def list_folder(self, folder_token):

@@ -511,6 +511,19 @@
           <div class="tx"><b style="color:#ff8b95">清除已保存的 Key</b> — 切换为纯规则审核（不调 AI）</div>
           <label class="switch"><input type="checkbox" id="clearKey"><span class="slider"></span></label>
         </div>
+        <div class="field">
+          <div class="f-label"><svg><use href="#i-sliders"/></svg>并发审核数（提速）</div>
+          <select class="inp" id="llmConc">
+            <option value="1">1 — 串行，最稳</option>
+            <option value="2">2</option>
+            <option value="4">4 — 推荐</option>
+            <option value="6">6</option>
+            <option value="8">8</option>
+            <option value="12">12</option>
+            <option value="16">16 — 易触发限流</option>
+          </select>
+          <div class="f-hint">多个文档并行审核（下载 + AI 判定）。数据量大时调高可显著提速；报「LLM 判定失败」可调低。保存并重启后生效。</div>
+        </div>
         <div class="f-hint" id="llmHint"></div>
       </div>
     </div>
@@ -821,6 +834,15 @@ function renderConfig(){
   setRule("ruleR3", re.r3 !== false);
   setRule("ruleR4", re.r4 !== false);
   setRule("ruleR5", re.r5 !== false);
+  // 并发审核数：仅在服务端配置值变化时才覆盖下拉框（不打断用户未保存的选择）
+  const concEl = $("llmConc");
+  if (concEl){
+    const nConc = String(c.concurrency || 4);
+    if (lastConcShown !== nConc){
+      concEl.value = nConc;
+      lastConcShown = nConc;
+    }
+  }
   const llmOn = !!re.r5 || !!re.r4;
   const rulesHint = $("rulesHint");
   if (rulesHint){
@@ -881,7 +903,7 @@ function renderConfig(){
 }
 
 /* ---------------- 状态轮询 ---------------- */
-let lastKey="", appAccInit=false;
+let lastKey="", appAccInit=false, lastConcShown="";
 async function refreshState(){
   try{
     const r = await fetch("/api/state",{cache:"no-store"});
@@ -917,6 +939,8 @@ function countDirty(){
   if($("clearKey").checked) n++;
   if($("clearSecret").checked) n++;
   if($("clearFolder").checked) n++;
+  const concEl = $("llmConc");
+  if(concEl && String(parseInt(concEl.value)||4) !== String(st.config.concurrency||4)) n++;
   return n;
 }
 function setDirty(n){
@@ -932,6 +956,8 @@ function onFieldInput(){
 }
 $$("input").forEach(el=> el.addEventListener("input", onFieldInput));
 $("clearKey").addEventListener("change", onFieldInput);
+const _concEl = $("llmConc");
+if(_concEl) _concEl.addEventListener("change", onFieldInput);
 
 /* ---------------- 链接实时解析 ---------------- */
 const TOKEN_RE = /(?:\/sheets\/|\/base\/)([A-Za-z0-9]{15,})|(?:^|[\s,，])([A-Za-z0-9]{20,})(?:[\s,，]|$)/;
@@ -1053,6 +1079,10 @@ function collect(){
     r4: $("ruleR4").checked,
     r5: $("ruleR5").checked,
   };
+  // 并发审核数（仅在与当前配置不同才提交）
+  const concEl = $("llmConc");
+  if(concEl && String(parseInt(concEl.value)||4) !== String(st.config.concurrency||4))
+    c.concurrency = parseInt(concEl.value) || 4;
   return c;
 }
 function clearFields(){
@@ -1065,6 +1095,9 @@ function clearFields(){
   $("eyeSecretBtn").innerHTML = icon("i-eye"); secretVisible = false;
   // 五条规则默认全部启用
   ["ruleR1","ruleR2","ruleR3","ruleR4","ruleR5"].forEach(id=> { const el=$(id); if(el) el.checked = true; });
+  // 并发下拉复位到当前已保存值
+  const concEl = $("llmConc");
+  if(concEl){ const n = String(st.config.concurrency||4); concEl.value = n; lastConcShown = n; }
   const pb = $("parseBar"); pb.style.display="none";
   setDirty(0);
 }
