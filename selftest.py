@@ -42,12 +42,12 @@ def main():
     res = audit_text(text, split_keywords("蓝海, 蓝海科技"), terms, ["AI生成", "免责声明"], ["竞品X"])
     check("规则全过样例", res["passed"], str(res["reasons"]))
 
-    # 2. 规则一不通过：出现 DeepSeek
+    # 2. 规则一不通过：出现痕迹话术（模型名已不拦截，2026-09-13 口径收敛）
     p2 = os.path.join(tmp, "r1.docx")
-    make_docx(p2, "蓝海体验", ["蓝海新品体验很好。", "据说 DeepSeek 也赞不绝口。"])
+    make_docx(p2, "蓝海体验", ["蓝海新品体验很好。", "本文以下由AI生成。", "据说 DeepSeek 也赞不绝口。"])
     _, text = parse_doc(p2)
     res = audit_text(text, ["蓝海"], terms, ["AI生成", "免责声明"], [])
-    check("规则一命中DeepSeek", (not res["passed"]) and any("规则一" in r and "deepseek" in r.lower() for r in res["reasons"]), str(res["reasons"]))
+    check("规则一命中痕迹话术", (not res["passed"]) and any("规则一" in r and "以下由ai生成" in r.lower() for r in res["reasons"]), str(res["reasons"]))
 
     # 3. 规则二不通过：出现「免责声明」和「AI生成」
     p3 = os.path.join(tmp, "r2.docx")
