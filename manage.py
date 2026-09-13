@@ -26,7 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
-from fsaudit.config import load_config, save_config, parse_spreadsheet_token  # noqa: E402
+from fsaudit.config import load_config, save_config, parse_spreadsheet_token, parse_folder_token  # noqa: E402
 
 PORT = int(os.environ.get("PANEL_PORT", "8788"))
 PID_FILE = os.path.join(BASE_DIR, "bot.pid")
@@ -179,6 +179,8 @@ def bot_restart():
 def public_config():
     cfg = load_config()
     return {
+        "app_id": cfg.app_id,
+        "app_secret_set": bool(cfg.app_secret),
         "spreadsheet_token": cfg.spreadsheet_token,
         "folder_token": cfg.folder_token,
         "llm": {
@@ -195,6 +197,43 @@ def public_config():
 def update_config(payload):
     cfg = load_config()
     notes = []
+
+    # 0) 机器人应用凭证（app_id / app_secret；留空 = 不改）
+    app = payload.get("app") or {}
+    cred_changed = False
+    new_app_id = (app.get("app_id") or "").strip()
+    if new_app_id and new_app_id != cfg.app_id:
+        if not re.fullmatch(r"cli_[A-Za-z0-9]+", new_app_id):
+            return {"ok": False, "msg": "app_id 格式不对，应为 cli_ 开头的字符串（飞书开放平台→应用详情页）"}
+        notes.append("应用 app_id：%s → %s" % (cfg.app_id or "(空)", new_app_id))
+        cfg.app_id = new_app_id
+        cred_changed = True
+    if app.get("clear_app_secret"):
+        if cfg.app_secret:
+            notes.append("已清除 App Secret")
+        cfg.app_secret = ""
+        cred_changed = True
+    elif (app.get("app_secret") or "").strip():
+        cfg.app_secret = app["app_secret"].strip()
+        notes.append("已更新 App Secret")
+        cred_changed = True
+    if cred_changed and not (cfg.app_id and cfg.app_secret):
+        notes.append("⚠ 应用凭证不完整（app_id / App Secret 缺一），机器人将无法连接飞书")
+
+    # 0.5) 云空间文件夹 token（可选；支持整段链接；可清除）
+    raw = (payload.get("folder") or "").strip()
+    if app.get("clear_folder") or payload.get("clear_folder"):
+        if cfg.folder_token:
+            notes.append("已清除云空间文件夹 token")
+        cfg.folder_token = ""
+    elif raw:
+        try:
+            token = parse_folder_token(raw)
+        except ValueError as e:
+            return {"ok": False, "msg": str(e)}
+        if token != cfg.folder_token:
+            notes.append("文件夹 token：%s → %s" % (cfg.folder_token or "(空)", token))
+            cfg.folder_token = token
 
     # 1) 表格链接（支持整段链接或裸 token，留空 = 不改）
     raw = (payload.get("spreadsheet") or "").strip()
@@ -262,6 +301,8 @@ def update_config(payload):
         save_config(cfg)
     except Exception as e:
         return {"ok": False, "msg": "保存 config.yaml 失败: %s" % e}
+    if cred_changed:
+        notes.append("⚠ 应用凭证变更需重启机器人后生效（下方「保存并重启」会自动处理）")
     notes = notes or ["配置无变化，未写入"]
     return {"ok": True, "msg": "；".join(notes),
             "spreadsheet_token": cfg.spreadsheet_token}

@@ -305,6 +305,7 @@
     .vdiv{display:none}
     .h-actions{flex-direction:row;flex-wrap:wrap}
     .span-6{grid-column:span 12}
+    #botCard .c-body{grid-template-columns:1fr}
   }
   @media (max-width:640px){
     .h-info{grid-template-columns:1fr}
@@ -455,6 +456,50 @@
           <label class="switch"><input type="checkbox" id="clearKey"><span class="slider"></span></label>
         </div>
         <div class="f-hint" id="llmHint"></div>
+      </div>
+    </div>
+
+    <!-- 机器人应用凭证 -->
+    <div class="card span-12" id="botCard">
+      <div class="c-head">
+        <div class="c-ico"><svg><use href="#i-bot"/></svg></div>
+        <div>
+          <div class="c-title">机器人应用凭证（飞书开放平台）</div>
+          <div class="c-sub">app_id / App Secret 决定机器人身份；改动后需重启机器人生效</div>
+        </div>
+        <span class="c-badge" id="appBadge" style="display:none"></span>
+      </div>
+      <div class="c-body" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="field">
+          <div class="f-label"><svg><use href="#i-cpu"/></svg>App ID</div>
+          <input class="inp mono" id="appId" placeholder="cli_xxxxxxxxxxxxxxxx"
+                 autocomplete="off" spellcheck="false">
+          <div class="f-hint" id="appHint">飞书开放平台 → 应用详情 → 凭证与基础信息。留空则保持当前值。</div>
+        </div>
+        <div class="field">
+          <div class="f-label"><svg><use href="#i-key"/></svg>App Secret</div>
+          <div class="input-wrap">
+            <input class="inp mono" id="appSecret" type="password" placeholder="留空则保持已保存的 Secret"
+                   autocomplete="new-password" spellcheck="false" style="padding-right:38px">
+            <button class="eye" id="eyeSecretBtn" title="显示 / 隐藏"><svg><use href="#i-eye"/></svg></button>
+          </div>
+          <div class="f-hint" id="secretHint"></div>
+        </div>
+        <div class="field" style="grid-column:1 / -1">
+          <div class="f-label"><svg><use href="#i-link"/></svg>云空间文件夹（可选）</div>
+          <input class="inp mono" id="folderToken" placeholder="https://xxx.feishu.cn/drive/folder/… 或留空"
+                 autocomplete="off" spellcheck="false">
+          <div class="f-hint" id="folderHint">粘贴完整链接或裸 token；用于机器人有权限访问的文档目录。留空则保持当前。</div>
+        </div>
+        <div class="switch-row" style="grid-column:1 / -1">
+          <div class="tx"><b style="color:#ff8b95">清除已保存的 App Secret</b> — 换应用或排查凭证问题时使用（清除后机器人无法启动）</div>
+          <label class="switch"><input type="checkbox" id="clearSecret"><span class="slider"></span></label>
+        </div>
+        <div class="switch-row" style="grid-column:1 / -1">
+          <div class="tx"><b>清除云空间文件夹配置</b> — 不再绑定文件夹时使用</div>
+          <label class="switch"><input type="checkbox" id="clearFolder"><span class="slider"></span></label>
+        </div>
+        <div class="f-hint" id="botHint" style="grid-column:1 / -1"></div>
       </div>
     </div>
 
@@ -768,9 +813,36 @@ function renderConfig(){
       : "· 规则一/二/三为本地确定性（零费用）· 规则四/五调用 LLM（消耗 token）";
   }
 
+  // 机器人应用凭证渲染
+  const appId = c.app_id || "";
+  const appBadge = $("appBadge");
+  appBadge.style.display = "";
+  const secretSet = !!c.app_secret_set;
+  if (appId && secretSet){
+    appBadge.className = "c-badge g";
+    appBadge.textContent = "● 凭证已配置 " + (appId.length>12 ? appId.slice(0,9)+"…" : appId);
+  } else if (appId || secretSet) {
+    appBadge.className = "c-badge y";
+    appBadge.textContent = "○ 凭证不完整";
+  } else {
+    appBadge.className = "c-badge";
+    appBadge.textContent = "○ 未配置";
+  }
+  $("secretHint").textContent = secretSet
+    ? "当前已保存 App Secret（已打码存储）"
+    : "当前未保存 App Secret";
+  $("folderHint").textContent = c.folder_token
+    ? "当前文件夹："+c.folder_token+" — 粘贴新链接替换，留空保持当前"
+    : "粘贴完整链接或裸 token；用于机器人有权限访问的文档目录。留空则保持当前。";
+  $("botHint").textContent = appId
+    ? "当前应用："+appId+"（改动凭证后务必「保存并重启」）"
+    : "";
+
   // 占位符显示"当前值"（不改动输入中的 value）
   const ph = {
     spreadsheet: tk? "当前："+tk : "https://xxx.feishu.cn/sheets/…",
+    appId: appId? "当前："+appId : "cli_xxxxxxxxxxxxxxxx",
+    folderToken: c.folder_token? "当前："+c.folder_token : "https://xxx.feishu.cn/drive/folder/… 或留空",
     llmModel: llm.model||"deepseek-chat",
     llmBase: llm.base_url||"https://api.deepseek.com",
     colKeyword: cols.keyword||"项目",
@@ -819,12 +891,14 @@ async function refreshState(){
 }
 
 /* ---------------- 脏检测（未保存修改） ---------------- */
-const FIELD_IDS = ["spreadsheet","llmModel","llmBase","llmKey",
+const FIELD_IDS = ["spreadsheet","appId","appSecret","folderToken","llmModel","llmBase","llmKey",
                    "colKeyword","colLink","colResult","colReason","colForbidden"];
 function countDirty(){
   let n = 0;
   FIELD_IDS.forEach(id=>{ if($(id).value.trim()) n++; });
   if($("clearKey").checked) n++;
+  if($("clearSecret").checked) n++;
+  if($("clearFolder").checked) n++;
   return n;
 }
 function setDirty(n){
@@ -882,6 +956,28 @@ $("clearKey").addEventListener("change", function(){
   else { k.placeholder = st.config.llm.api_key_set? "留空则保持已保存的 Key":"sk-…"; }
 });
 
+/* ---------------- App Secret 显隐与清除 ---------------- */
+let secretVisible=false;
+$("eyeSecretBtn").onclick = function(){
+  secretVisible = !secretVisible;
+  const k = $("appSecret");
+  k.type = secretVisible? "text":"password";
+  this.innerHTML = icon(secretVisible?"i-eyeoff":"i-eye");
+};
+$("clearSecret").addEventListener("change", function(){
+  const k = $("appSecret");
+  k.disabled = this.checked;
+  k.value = "";
+  if(this.checked){ k.placeholder="（保存后将清除已存 Secret）"; }
+  else { k.placeholder = (st.config||{}).app_secret_set? "留空则保持已保存的 Secret":""; }
+});
+$("clearFolder").addEventListener("change", function(){
+  const k = $("folderToken");
+  k.disabled = this.checked;
+  k.value = "";
+  if(this.checked){ k.placeholder="（保存后将清除文件夹配置）"; }
+});
+
 /* ---------------- 复制 ---------------- */
 async function copyText(txt, okMsg){
   try{ await navigator.clipboard.writeText(txt); toast("ok","已复制", okMsg||txt, 2000); }
@@ -909,6 +1005,15 @@ async function api(path, opts={}){
 /* ---------------- 收集配置 ---------------- */
 function collect(){
   const c = {};
+  // 机器人应用凭证
+  const app = {};
+  if($("appId").value.trim()) app.app_id = $("appId").value.trim();
+  if($("appSecret").value.trim()) app.app_secret = $("appSecret").value.trim();
+  if($("clearSecret").checked) app.clear_app_secret = true;
+  if($("clearFolder").checked) app.clear_folder = true;
+  if(Object.keys(app).length) c.app = app;
+  const fv = $("folderToken").value.trim();
+  if(fv) c.folder = fv;
   const v = $("spreadsheet").value.trim();
   if(v) c.spreadsheet = v;
   const llm = {};
@@ -933,9 +1038,13 @@ function collect(){
   return c;
 }
 function clearFields(){
-  ["spreadsheet","llmModel","llmBase","llmKey",
+  ["spreadsheet","appId","appSecret","folderToken","llmModel","llmBase","llmKey",
    "colKeyword","colLink","colResult","colReason","colForbidden"].forEach(id=> $(id).value="");
   $("clearKey").checked = false; $("llmKey").disabled = false;
+  $("clearSecret").checked = false; $("appSecret").disabled = false;
+  $("clearFolder").checked = false;
+  const sk = $("appSecret"); sk.type = "password";
+  $("eyeSecretBtn").innerHTML = icon("i-eye"); secretVisible = false;
   // 五条规则默认全部启用
   ["ruleR1","ruleR2","ruleR3","ruleR4","ruleR5"].forEach(id=> { const el=$(id); if(el) el.checked = true; });
   const pb = $("parseBar"); pb.style.display="none";
