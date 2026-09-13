@@ -31,7 +31,8 @@ from .config import AppConfig, load_config, DOC_EXTS
 from .feishu import Feishu, FeishuError
 from .docparse import parse_doc, DocParseError
 from .llm import BrandIdentifier
-from .rules import load_ai_terms, load_brands, split_keywords, col_letter, audit_text
+from .rules import (load_ai_terms, load_brands, load_absolute_terms,
+                    split_keywords, col_letter, audit_text)
 from .viewpoint import ViewpointAuditor, format_issues
 from .ai_quality import AIQualityAuditor, format_hard_reasons, format_suggestions
 
@@ -88,6 +89,7 @@ class AuditEngine(object):
         token = cfg.spreadsheet_token
         ai_terms = load_ai_terms()
         brands_lex = load_brands()
+        absolute = load_absolute_terms()
 
         want = set(sheet_ids)
         chosen = [s for s in self.fs.list_sheets(token) if s["sheet_id"] in want]
@@ -201,7 +203,7 @@ class AuditEngine(object):
                                if not any(b in k or k in b for k in keywords)]
 
                 res = audit_text(text, keywords, ai_terms, cfg.forbidden_words,
-                                 competitors, cfg.rules_enabled)
+                                 competitors, cfg.rules_enabled, absolute)
                 reasons = list(res["reasons"])
                 # 规则四 · 观点级主角性（LLM）：仅当前三条确定性规则通过、
                 # 我方关键词确在文中出现、识别到竞品、且规则四开关打开时调用

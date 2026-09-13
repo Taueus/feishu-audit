@@ -35,7 +35,7 @@ from fsaudit.feishu import Feishu, FeishuError
 from fsaudit.docparse import parse_doc, DocParseError
 from fsaudit.llm import BrandIdentifier
 from fsaudit.rules import (audit_text, load_ai_terms, load_brands,
-                           split_keywords, col_letter)
+                           load_absolute_terms, split_keywords, col_letter)
 
 LOG_FILE = os.path.join(BASE_DIR, "audit_%s.log" % date.today().strftime("%Y%m%d"))
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
@@ -167,6 +167,7 @@ def run_audit(args):
     identifier = BrandIdentifier(cfg.llm, cache_dir=CACHE_DIR)
     ai_terms = load_ai_terms()
     brands_lex = load_brands()
+    absolute = load_absolute_terms()
     if identifier.available():
         print("（LLM 模式：规则三竞品识别 = LLM 品牌实体识别 + 本地词库兜底）")
     else:
@@ -261,7 +262,8 @@ def run_audit(args):
             competitors = [b for b in all_brands
                            if not any(b in k or k in b for k in keywords)]
 
-            res = audit_text(text, keywords, ai_terms, cfg.forbidden_words, competitors)
+            res = audit_text(text, keywords, ai_terms, cfg.forbidden_words,
+                             competitors, cfg.rules_enabled, absolute)
             reason = "；".join(res["reasons"])
             result_text = "通过" if res["passed"] else "不通过"
             if res["passed"]:

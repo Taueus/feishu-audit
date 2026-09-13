@@ -29,6 +29,7 @@ DEFAULT_RULES_ENABLED = {
     "r3": True,  # 规则三·关键词位置（确定性，我方须先于竞品出现）
     "r4": True,  # 规则四·观点级主角性（LLM）
     "r5": True,  # 规则五·AI 人味 & AI 收录友好度（LLM+启发式）
+    "r6": True,  # 规则六·广告法绝对化用语（确定性，wordbooks/absolute_terms.yaml）
 }
 
 

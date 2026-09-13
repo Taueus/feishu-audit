@@ -574,6 +574,13 @@
           </div>
           <label class="switch"><input type="checkbox" id="ruleR5"><span class="slider"></span></label>
         </div>
+        <div class="switch-row" data-rule="r6">
+          <div class="tx">
+            <b>规则六·广告法绝对化用语</b>
+            <div class="muted">最强 / 最顶级 / 世界第一 / NO.1 等极限词，本地词库+正则；命中即不通过</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="ruleR6"><span class="slider"></span></label>
+        </div>
         <div class="field" style="margin-top:12px">
           <div class="f-label"><svg><use href="#i-sliders"/></svg>违禁词列表（规则二 · 逗号分隔）</div>
           <input class="inp" id="colForbidden" autocomplete="off" spellcheck="false"
@@ -834,6 +841,7 @@ function renderConfig(){
   setRule("ruleR3", re.r3 !== false);
   setRule("ruleR4", re.r4 !== false);
   setRule("ruleR5", re.r5 !== false);
+  setRule("ruleR6", re.r6 !== false);
   // 并发审核数：仅在服务端配置值变化时才覆盖下拉框（不打断用户未保存的选择）
   const concEl = $("llmConc");
   if (concEl){
@@ -1071,13 +1079,14 @@ function collect(){
     const el = $("col"+k); if(el.value.trim()) cols[k.toLowerCase()] = el.value.trim(); });
   if(Object.keys(cols).length) c.columns = cols;
   if($("colForbidden").value.trim()) c.forbidden_words = $("colForbidden").value.trim();
-  // 五条规则启停开关
+  // 六条规则启停开关
   c.rules_enabled = {
     r1: $("ruleR1").checked,
     r2: $("ruleR2").checked,
     r3: $("ruleR3").checked,
     r4: $("ruleR4").checked,
     r5: $("ruleR5").checked,
+    r6: $("ruleR6").checked,
   };
   // 并发审核数（仅在与当前配置不同才提交）
   const concEl = $("llmConc");
@@ -1094,7 +1103,7 @@ function clearFields(){
   const sk = $("appSecret"); sk.type = "password";
   $("eyeSecretBtn").innerHTML = icon("i-eye"); secretVisible = false;
   // 五条规则默认全部启用
-  ["ruleR1","ruleR2","ruleR3","ruleR4","ruleR5"].forEach(id=> { const el=$(id); if(el) el.checked = true; });
+  ["ruleR1","ruleR2","ruleR3","ruleR4","ruleR5","ruleR6"].forEach(id=> { const el=$(id); if(el) el.checked = true; });
   // 并发下拉复位到当前已保存值
   const concEl = $("llmConc");
   if(concEl){ const n = String(st.config.concurrency||4); concEl.value = n; lastConcShown = n; }

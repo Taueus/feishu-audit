@@ -4,6 +4,7 @@
 规则一：AI 痕迹词库匹配（wordbooks/ai_terms.yaml）
 规则二：写死违禁词精确匹配（默认「AI生成」「免责声明」）
 规则三：我方关键词首次出现位置必须早于任何竞品
+规则六：广告法绝对化用语（wordbooks/absolute_terms.yaml，子串+正则）
 （规则四 · 观点级主角性为 LLM 判定，见 fsaudit/viewpoint.py，由 engine 调用）
 """
 import os
@@ -38,6 +39,19 @@ def load_brands():
     return _read_yaml("brands.yaml", "known_brands")
 
 
+def load_absolute_terms():
+    """加载广告法绝对化用语词库，返回 (terms, patterns)。
+    词库文件缺失或某一段为空时对应返回空列表。"""
+    path = os.path.join(WORDBOOK_DIR, "absolute_terms.yaml")
+    terms, patterns = [], []
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        terms = [str(x).strip() for x in (data.get("terms") or []) if str(x).strip()]
+        patterns = [str(x).strip() for x in (data.get("patterns") or []) if str(x).strip()]
+    return terms, patterns
+
+
 def split_keywords(cell):
     """把「项目」单元格拆成多个关键词"""
     cell = (cell or "").strip()
@@ -55,6 +69,34 @@ def rule1_hits(text, terms):
 def rule2_hits(text, words):
     t = (text or "").lower()
     return [w for w in words if w.lower() in t]
+
+
+# 规则六命中展示上限（防止极端文章刷屏）
+ABSOLUTE_DISPLAY_CAP = 10
+
+
+def rule6_hits(text, terms, patterns):
+    """广告法绝对化用语命中检测。
+    terms 走子串匹配（不区分大小写），patterns 走正则匹配；
+    命中去重 + 子串折叠：某命中被另一命中完整包含时只报较长者
+    （如命中「最顶级」时不再重复报「顶级」）。"""
+    t = text or ""
+    low = t.lower()
+    hits = set()
+    for w in terms:
+        if w.lower() in low:
+            hits.add(w)
+    for p in patterns:
+        try:
+            for m in re.finditer(p, t):
+                s = m.group(0).strip()
+                if s:
+                    hits.add(s)
+        except re.error:
+            continue  # 词库里的非法正则直接跳过，不炸审核
+    out = [h for h in hits if not any(h != k and h in k for k in hits)]
+    out.sort(key=len, reverse=True)
+    return out
 
 
 def is_mine(brand, keywords):
@@ -77,13 +119,15 @@ def rule3_check(text, keywords, competitors):
     return True, None
 
 
-def audit_text(text, keywords, ai_terms, forbidden_words, competitors, rules_enabled=None):
-    """执行确定性审核规则（规则一二三），返回 {"passed": bool, "reasons": [str]}
-    rules_enabled: dict，键为 r1/r2/r3；缺省视为全开。
+def audit_text(text, keywords, ai_terms, forbidden_words, competitors,
+               rules_enabled=None, absolute=None):
+    """执行确定性审核规则（规则一/二/三/六），返回 {"passed": bool, "reasons": [str]}
+    rules_enabled: dict，键为 r1/r2/r3/r6；缺省视为全开。
+    absolute: (terms, patterns) 元组，规则六的绝对化用语词库；None 时跳过规则六。
     规则四/五（LLM 判定）由 engine 另行调用并按 r4/r5 开关决定是否触发。"""
-    enabled = {"r1": True, "r2": True, "r3": True}
+    enabled = {"r1": True, "r2": True, "r3": True, "r6": True}
     if rules_enabled:
-        for k in ("r1", "r2", "r3"):
+        for k in ("r1", "r2", "r3", "r6"):
             if k in rules_enabled:
                 enabled[k] = bool(rules_enabled[k])
     reasons = []
@@ -99,6 +143,14 @@ def audit_text(text, keywords, ai_terms, forbidden_words, competitors, rules_ena
         ok3, why = rule3_check(text, keywords, competitors)
         if not ok3:
             reasons.append(why)
+    if enabled["r6"] and absolute:
+        abs_terms, abs_patterns = absolute
+        r6 = rule6_hits(text, abs_terms, abs_patterns)
+        if r6:
+            shown = "、".join(r6[:ABSOLUTE_DISPLAY_CAP])
+            if len(r6) > ABSOLUTE_DISPLAY_CAP:
+                shown += " 等共%d处" % len(r6)
+            reasons.append("规则六：出现广告法绝对化用语「%s」" % shown)
     return {"passed": not reasons, "reasons": reasons}
 
 

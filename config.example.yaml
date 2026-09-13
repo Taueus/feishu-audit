@@ -55,6 +55,7 @@ forbidden_words: [AI生成, 免责声明]
 
 # ===== 高级：规则词库 =====
 # wordbooks/ai_terms.yaml  规则一 AI 痕迹词库（命中即不通过）
+# wordbooks/absolute_terms.yaml  规则六 广告法绝对化用语（极限词）库（terms 子串 + patterns 正则）
 # wordbooks/brands.yaml    本地竞品品牌词库（参与规则三位置比对）
 
 # ===== 各规则启停开关（每条独立可关，默认全开）=====
@@ -63,6 +64,8 @@ forbidden_words: [AI生成, 免责声明]
 # r3 规则三·关键词位置（确定性，我方须先于竞品出现）
 # r4 规则四·观点级主角性（LLM，按观点块判定：观点被竞品占据 / 负面块现我方）
 # r5 规则五·AI 人味 & AI 收录友好度（LLM+启发式，硬性一票否决 + 建议项）
+# r6 规则六·广告法绝对化用语（确定性，最强/最顶级/世界第一/NO.1 等极限词，
+#    词库在 wordbooks/absolute_terms.yaml，可自行增删，改完无需重启）
 # 也可在运维面板「审核规则启停」卡片切换。LLM 类规则需 llm.api_key 配置才生效。
 rules_enabled:
   r1: true
@@ -70,6 +73,7 @@ rules_enabled:
   r3: true
   r4: true
   r5: true
+  r6: true
 
 # ===== 审核速度（数据量大时调优）=====
 # 并发审核的文档数：多个文档并行处理（下载附件 + LLM 判定）。
