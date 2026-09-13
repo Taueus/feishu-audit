@@ -64,6 +64,20 @@ def main():
     res = audit_text(text, ["蓝海"], terms, ["AI生成", "免责声明"], [])
     check("规则二空格变体命中", (not res["passed"]) and any("规则二" in r and "AI生成" in r for r in res["reasons"]), str(res["reasons"]))
 
+    # 3c. 规则二开头署名/时间戳：「作者：xx」「时间：xx年x月」不通过（2026-09-13 新口径）
+    p3c = os.path.join(tmp, "r2c.docx")
+    make_docx(p3c, "蓝海体验报告", ["作者：张三", "时间：2026年9月", "蓝海新品体验很好。"])
+    _, text = parse_doc(p3c)
+    res = audit_text(text, ["蓝海"], terms, ["AI生成", "免责声明"], [])
+    check("规则二开头署名时间戳", (not res["passed"]) and any("规则二" in r and "署名" in r and "作者" in r for r in res["reasons"]), str(res["reasons"]))
+
+    # 3d. 规则二开头署名防误伤：正文提及「作者」、散文「时间：」不拦截
+    p3d = os.path.join(tmp, "r2d.docx")
+    make_docx(p3d, "蓝海体验报告", ["时间：是最好的证明。", "本文作者认为蓝海不错。"])
+    _, text = parse_doc(p3d)
+    res = audit_text(text, ["蓝海"], terms, ["AI生成", "免责声明"], [])
+    check("规则二署名防误伤", res["passed"], str(res["reasons"]))
+
     # 4. 规则三不通过：竞品先出现
     p4 = os.path.join(tmp, "r3.docx")
     make_docx(p4, "竞品X对比评测", ["竞品X最近很火。", "对比来看蓝海更胜一筹。"])

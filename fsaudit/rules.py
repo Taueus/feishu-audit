@@ -138,6 +138,64 @@ def rule2_hits(text, words):
     return term_hits(text, words)
 
 
+# ---------------- 规则二 · 开头署名/时间戳检测 ----------------
+# 口径（2026-09-13 用户需求）：文章开头出现「作者：xx」「时间：xx年x月」
+# 这类署名/时间戳行文 → 规则二不通过。
+# 防误伤设计：
+#   1) 只检查开头前 _HEADER_META_MAX_LINES 个非空行，正文中提及不算
+#   2) 标记必须位于行首（允许（/【等括号前缀），「时间管理：」「作者观点：」不命中
+#   3) 时间/日期类标记要求冒号后 20 字内出现数字，防「时间：是最好的证明」散文句误伤
+#   4) 标签字符间允许空白（「作 者：」）+ NFKC 归一化（全角冒号/字母）
+_HEADER_META_LABELS = ("作者", "撰稿人", "撰稿", "记者", "编辑",
+                       "发布时间", "发布日期", "时间", "日期")
+_HEADER_META_LABELS_EN = ("author", "writer", "date")
+_HEADER_META_TIME_LIKE = ("时间", "日期", "发布时间", "发布日期", "time", "date")
+_HEADER_META_MAX_LINES = 6
+
+
+def _build_header_meta_re():
+    labs = sorted(set(_HEADER_META_LABELS) | set(_HEADER_META_LABELS_EN),
+                  key=len, reverse=True)  # 长标签优先，防「发布时间」被「时间」截胡
+    alts = [r"\s*".join(re.escape(c) for c in lab) for lab in labs]
+    return re.compile(r"(?i)^[\s（(【\[]*(" + "|".join(alts) + r")\s*:\s*(\S.*)$")
+
+
+_HEADER_META_LINE_RE = _build_header_meta_re()
+
+
+def rule2_header_check(text):
+    """开头署名/时间戳检测，返回 (通过?, 原因)。
+
+    文章开头（前几个非空行）出现「作者：xx」「时间：xx年x月」
+    「日期：…」「Author: …」等署名/时间戳行 → 不通过。"""
+    t = unicodedata.normalize("NFKC", text or "")
+    if not t:
+        return True, None
+    n_lines = 0
+    found = []
+    for ln in t.split("\n"):
+        s = ln.strip()
+        if not s:
+            continue
+        n_lines += 1
+        if n_lines > _HEADER_META_MAX_LINES:
+            break
+        m = _HEADER_META_LINE_RE.match(s)
+        if not m:
+            continue
+        label = _WS_ZW_RE.sub("", m.group(1)).lower()
+        content = m.group(2).strip()
+        if label in _HEADER_META_TIME_LIKE and not re.search(r"\d", content[:20]):
+            continue  # 时间/日期类后面没有数字 → 视为散文行文，不算时间戳
+        snippet = ("%s：%s" % (label, content))[:24]
+        if snippet not in found:
+            found.append(snippet)
+    if found:
+        shown = "；".join(found[:3])
+        return False, "规则二：文章开头出现署名/时间戳表述（%s）" % shown
+    return True, None
+
+
 # 规则六命中展示上限（防止极端文章刷屏）
 ABSOLUTE_DISPLAY_CAP = 10
 
@@ -336,6 +394,9 @@ def audit_text(text, keywords, ai_terms, forbidden_words, competitors,
         r2 = rule2_hits(text, forbidden_words)
         if r2:
             reasons.append("规则二：出现违禁词「%s」" % "、".join(r2))
+        ok_h, why_h = rule2_header_check(text)
+        if not ok_h:
+            reasons.append(why_h)
     if enabled["r3"]:
         ok3, why = rule3_check(text, keywords, competitors)
         if not ok3:
