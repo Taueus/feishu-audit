@@ -35,7 +35,9 @@ from fsaudit.feishu import Feishu, FeishuError
 from fsaudit.docparse import parse_doc, DocParseError
 from fsaudit.llm import BrandIdentifier
 from fsaudit.rules import (audit_text, load_ai_terms, load_brands,
-                           load_absolute_terms, split_keywords, col_letter)
+                           load_my_products, load_absolute_terms,
+                           split_keywords, col_letter,
+                           is_mine, is_own_product, find_keyword)
 
 LOG_FILE = os.path.join(BASE_DIR, "audit_%s.log" % date.today().strftime("%Y%m%d"))
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
@@ -167,6 +169,7 @@ def run_audit(args):
     identifier = BrandIdentifier(cfg.llm, cache_dir=CACHE_DIR)
     ai_terms = load_ai_terms()
     brands_lex = load_brands()
+    my_products = load_my_products()
     absolute = load_absolute_terms()
     if identifier.available():
         print("（LLM 模式：规则三竞品识别 = LLM 品牌实体识别 + 本地词库兜底）")
@@ -259,8 +262,10 @@ def run_audit(args):
                 brands = []
             lex = [b for b in brands_lex if b.lower() in text.lower()]
             all_brands = list(dict.fromkeys(brands + lex))
+            # 竞品 = 识别出的实体里去掉我方（与关键词相关）和自有产品白名单
             competitors = [b for b in all_brands
-                           if not any(b in k or k in b for k in keywords)]
+                           if not is_mine(b, keywords)
+                           and not is_own_product(b, my_products)]
 
             res = audit_text(text, keywords, ai_terms, cfg.forbidden_words,
                              competitors, cfg.rules_enabled, absolute)

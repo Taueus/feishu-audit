@@ -40,6 +40,12 @@ def load_brands():
     return _read_yaml("brands.yaml", "known_brands")
 
 
+def load_my_products():
+    """自有品牌/产品白名单（brands.yaml 的 my_products 段）：
+    识别出的实体命中白名单时不计入竞品（如本品牌旗下产品、子品牌、系列名）。"""
+    return _read_yaml("brands.yaml", "my_products")
+
+
 def load_absolute_terms():
     """加载广告法绝对化用语词库，返回 (terms, patterns)。
     词库文件缺失或某一段为空时对应返回空列表。"""
@@ -100,8 +106,85 @@ def rule6_hits(text, terms, patterns):
     return out
 
 
+# 关键词/品牌名 token 拆分：拉丁字母数字段（≥2位）或中文连续段（≥2字）。
+# 用于缩写回退匹配，如「科洛百KLB」拆出 [科洛百, KLB]，文中只写 KLB 也算命中。
+_TOKEN_RE = re.compile(r"[A-Za-z0-9]{2,}|[\u4e00-\u9fff]{2,}")
+
+
+def keyword_tokens(name):
+    """把关键词/品牌名拆成 token（中文连续段 + 拉丁字母数字段）"""
+    return _TOKEN_RE.findall(name or "")
+
+
+def _tok_related(a, b):
+    """两个 token 是否相关：相等或互为子串（≥2位才有意义）"""
+    if a == b:
+        return True
+    if len(a) >= 2 and a in b:
+        return True
+    if len(b) >= 2 and b in a:
+        return True
+    return False
+
+
+def find_keyword(text, kw):
+    """返回关键词在文本中首次出现的位置（找不到返回 -1），不区分大小写。
+    先整词匹配；整词未命中时按 token 回退——关键词里的任一 token
+    （如「科洛百KLB」的 KLB）出现在文中即视为我方关键词出现。
+    审核表口径：关键词出现缩写/子串即算，不要求完整品牌全称。"""
+    t = (text or "").lower()
+    k = (kw or "").strip().lower()
+    if not k:
+        return -1
+    i = t.find(k)
+    if i >= 0:
+        return i
+    for tok in keyword_tokens(k):
+        j = t.find(tok.lower())
+        if j >= 0:
+            return j
+    return -1
+
+
+def keyword_in_text(text, kw):
+    """关键词是否出现在文中（整词或 token 级）"""
+    return find_keyword(text, kw) >= 0
+
+
 def is_mine(brand, keywords):
-    return any(brand in k or k in brand for k in keywords)
+    """判断识别出的品牌/产品是否属于我方：
+    与任一关键词存在子串关系，或 token 级相关
+    （如关键词「科洛百KLB」与品牌「KLB时光棒精华」共享 KLB）。"""
+    b = (brand or "").strip()
+    if not b:
+        return False
+    btoks = keyword_tokens(b)
+    for k in keywords:
+        kk = (k or "").strip()
+        if not kk:
+            continue
+        if b in kk or kk in b:
+            return True
+        if any(_tok_related(x, y) for x in btoks for y in keyword_tokens(kk)):
+            return True
+    return False
+
+
+def is_own_product(name, my_products):
+    """品牌/产品名是否命中自有产品白名单（子串或 token 级相关）"""
+    n = (name or "").strip()
+    if not n:
+        return False
+    ntoks = keyword_tokens(n)
+    for p in my_products:
+        pp = (p or "").strip()
+        if not pp:
+            continue
+        if pp in n or n in pp:
+            return True
+        if any(_tok_related(x, y) for x in ntoks for y in keyword_tokens(pp)):
+            return True
+    return False
 
 
 # ---------------- 规则七 · FAQ 问答结构 ----------------
@@ -157,15 +240,17 @@ def rule7_faq_check(text):
 
 
 def rule3_check(text, keywords, competitors):
-    """返回 (通过?, 原因)"""
+    """返回 (通过?, 原因)。
+    我方关键词支持缩写/token 匹配：如关键词「科洛百KLB」，
+    文中出现「KLB」或「科洛百」任一即算我方关键词出现。"""
     if not keywords:
         return False, "规则三：「项目」字段未填写关键词"
-    t = (text or "").lower()
-    mine_idx = [t.find(k.lower()) for k in keywords]
-    found = [i for i in mine_idx if i >= 0]
+    idx = [find_keyword(text, k) for k in keywords]
+    found = [i for i in idx if i >= 0]
     if not found:
         return False, "规则三：我方关键词（%s）未在文中出现" % "、".join(keywords)
     my_first = min(found)
+    t = (text or "").lower()
     earlier = [b for b in competitors if 0 <= t.find(b.lower()) < my_first]
     if earlier:
         return False, "规则三：竞品「%s」首次出现早于我方关键词" % "、".join(earlier)

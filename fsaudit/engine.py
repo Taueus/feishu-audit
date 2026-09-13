@@ -31,8 +31,9 @@ from .config import AppConfig, load_config, DOC_EXTS
 from .feishu import Feishu, FeishuError
 from .docparse import parse_doc, DocParseError
 from .llm import BrandIdentifier
-from .rules import (load_ai_terms, load_brands, load_absolute_terms,
-                    split_keywords, col_letter, audit_text)
+from .rules import (load_ai_terms, load_brands, load_my_products,
+                    load_absolute_terms, split_keywords, col_letter,
+                    audit_text, is_mine, is_own_product, find_keyword)
 from .viewpoint import ViewpointAuditor, format_issues
 from .ai_quality import AIQualityAuditor, format_hard_reasons, format_suggestions
 
@@ -89,6 +90,7 @@ class AuditEngine(object):
         token = cfg.spreadsheet_token
         ai_terms = load_ai_terms()
         brands_lex = load_brands()
+        my_products = load_my_products()
         absolute = load_absolute_terms()
 
         want = set(sheet_ids)
@@ -199,8 +201,10 @@ class AuditEngine(object):
                     brands = []
                 lex = [b for b in brands_lex if b.lower() in text.lower()]
                 all_brands = list(dict.fromkeys(brands + lex))
+                # 竞品 = 识别出的实体里去掉我方（与关键词相关）和自有产品白名单
                 competitors = [b for b in all_brands
-                               if not any(b in k or k in b for k in keywords)]
+                               if not is_mine(b, keywords)
+                               and not is_own_product(b, my_products)]
 
                 res = audit_text(text, keywords, ai_terms, cfg.forbidden_words,
                                  competitors, cfg.rules_enabled, absolute)
@@ -210,7 +214,8 @@ class AuditEngine(object):
                 r4_on = cfg.rules_enabled.get("r4", True)
                 if (not reasons and competitors and r4_on
                         and self.viewpoint.available()
-                        and any((k or "").strip() and k.lower() in text.lower() for k in keywords)):
+                        and any((k or "").strip() and find_keyword(text, k) >= 0
+                                for k in keywords)):
                     try:
                         vp = self.viewpoint.audit(text, keywords, competitors)
                         if vp.get("issues"):
@@ -225,7 +230,8 @@ class AuditEngine(object):
                 # 仅在我方关键词确在文中出现时判定（无关键词则无可抽取断言可言）。
                 r5_on = cfg.rules_enabled.get("r5", True)
                 if (r5_on and self.ai_quality.available()
-                        and any((k or "").strip() and k.lower() in text.lower() for k in keywords)):
+                        and any((k or "").strip() and find_keyword(text, k) >= 0
+                                for k in keywords)):
                     try:
                         aq = self.ai_quality.audit(text, keywords)
                         # 硬性一票否决：理由前置到 reasons 头部，让作者先看硬伤
