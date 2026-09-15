@@ -36,6 +36,7 @@ from fsaudit.docparse import parse_doc, DocParseError
 from fsaudit.llm import BrandIdentifier
 from fsaudit.rules import (audit_text, load_ai_terms, load_brands,
                            load_my_products, load_absolute_terms,
+                           load_negative_terms,
                            split_keywords, col_letter,
                            is_mine, is_own_product, find_keyword)
 
@@ -171,6 +172,7 @@ def run_audit(args):
     brands_lex = load_brands()
     my_products = load_my_products()
     absolute = load_absolute_terms()
+    negative_terms = load_negative_terms()
     if identifier.available():
         print("（LLM 模式：规则三竞品识别 = LLM 品牌实体识别 + 本地词库兜底）")
     else:
@@ -268,7 +270,8 @@ def run_audit(args):
                            and not is_own_product(b, my_products)]
 
             res = audit_text(text, keywords, ai_terms, cfg.forbidden_words,
-                             competitors, cfg.rules_enabled, absolute)
+                             competitors, cfg.rules_enabled, absolute,
+                             negative_terms)
             reason = "；".join(res["reasons"])
             result_text = "通过" if res["passed"] else "不通过"
             if res["passed"]:

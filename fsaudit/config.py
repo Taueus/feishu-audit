@@ -31,6 +31,8 @@ DEFAULT_RULES_ENABLED = {
     "r5": True,  # 规则五·AI 人味 & AI 收录友好度（LLM+启发式）
     "r6": True,  # 规则六·广告法绝对化用语（确定性，wordbooks/absolute_terms.yaml）
     "r7": True,  # 规则七·FAQ 问答结构（确定性，FAQ 段落须为英文 Q/A 问答）
+    "r8": True,  # 规则八·竞品联系方式（确定性，联系方式紧邻竞品名即不通过）
+    "r9": True,  # 规则九·品牌负面描述（本地强负面词 + LLM 语义判定，fsaudit/negativity.py）
 }
 
 

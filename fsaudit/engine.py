@@ -32,10 +32,11 @@ from .feishu import Feishu, FeishuError
 from .docparse import parse_doc, DocParseError
 from .llm import BrandIdentifier
 from .rules import (load_ai_terms, load_brands, load_my_products,
-                    load_absolute_terms, split_keywords, col_letter,
-                    audit_text, is_mine, is_own_product, find_keyword)
+                    load_absolute_terms, load_negative_terms, split_keywords,
+                    col_letter, audit_text, is_mine, is_own_product, find_keyword)
 from .viewpoint import ViewpointAuditor, format_issues
 from .ai_quality import AIQualityAuditor, format_hard_reasons, format_suggestions
+from .negativity import NegativityAuditor, format_negatives
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
@@ -61,6 +62,7 @@ class AuditEngine(object):
         self.identifier = BrandIdentifier(self.cfg.llm, cache_dir=self.cache_dir)
         self.viewpoint = ViewpointAuditor(self.cfg.llm, cache_dir=self.cache_dir)
         self.ai_quality = AIQualityAuditor(self.cfg.llm, cache_dir=self.cache_dir)
+        self.negativity = NegativityAuditor(self.cfg.llm, cache_dir=self.cache_dir)
         self.log = setup_file_logging()
 
     # ------------------------------------------------ 列工作表
@@ -92,6 +94,7 @@ class AuditEngine(object):
         brands_lex = load_brands()
         my_products = load_my_products()
         absolute = load_absolute_terms()
+        negative_terms = load_negative_terms()
 
         want = set(sheet_ids)
         chosen = [s for s in self.fs.list_sheets(token) if s["sheet_id"] in want]
@@ -207,7 +210,8 @@ class AuditEngine(object):
                                and not is_own_product(b, my_products)]
 
                 res = audit_text(text, keywords, ai_terms, cfg.forbidden_words,
-                                 competitors, cfg.rules_enabled, absolute)
+                                 competitors, cfg.rules_enabled, absolute,
+                                 negative_terms)
                 reasons = list(res["reasons"])
                 # 规则四 · 观点级主角性（LLM）：仅当前三条确定性规则通过、
                 # 我方关键词确在文中出现、识别到竞品、且规则四开关打开时调用
@@ -245,6 +249,25 @@ class AuditEngine(object):
                                 reasons.append("规则五·收录优化建议——%s" % sug_txt)
                     except Exception as e:
                         self.log.warning("规则五 LLM 判定失败（行%d），本规则跳过：%s",
+                                         row_no, e)
+                # 规则九 · 品牌负面描述（本地快速路径 + LLM 语义判定）：
+                # 本地强负面词已在 audit_text 内判罚（命中即有 reasons）；
+                # 这里仅在本地未命中、且文中出现我方关键词或竞品时做 LLM 语义判定
+                # （识别隐性负面描述，如「用了三天就坏了」）。
+                r9_on = cfg.rules_enabled.get("r9", True)
+                brand_present = (competitors or
+                                 any((k or "").strip() and find_keyword(text, k) >= 0
+                                     for k in keywords))
+                if (r9_on and not reasons and brand_present
+                        and self.negativity.available()):
+                    try:
+                        neg = self.negativity.audit(text, keywords, competitors)
+                        if neg.get("issues"):
+                            neg_txt = format_negatives(neg["issues"])
+                            if neg_txt:
+                                reasons.append("规则九：%s" % neg_txt)
+                    except Exception as e:
+                        self.log.warning("规则九 LLM 判定失败（行%d），本规则跳过：%s",
                                          row_no, e)
                 passed = not reasons
                 reason = "；".join(reasons)

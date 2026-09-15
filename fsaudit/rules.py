@@ -6,6 +6,8 @@
 规则三：我方关键词首次出现位置必须早于任何竞品
 规则六：广告法绝对化用语（wordbooks/absolute_terms.yaml，子串+正则）
 规则七：FAQ 问答结构（FAQ 段落须为英文 Q/A 问答，中文「问/答」判不通过）
+规则八：竞品联系方式（手机/400/座机/邮箱/网址/微信/QQ 紧邻竞品名 → 不通过）
+规则九：品牌负面描述（本地强负面词快速路径；LLM 语义判定见 fsaudit/negativity.py）
 （规则四 · 观点级主角性为 LLM 判定，见 fsaudit/viewpoint.py，由 engine 调用）
 """
 import os
@@ -391,6 +393,146 @@ def rule7_faq_check(text):
     return True, None
 
 
+# ---------------- 规则八 · 竞品联系方式 ----------------
+# 口径（2026-09-15 用户需求）：文章中不得出现竞品的联系方式。
+# 我方自己的联系方式不受影响——只有联系方式紧邻竞品名出现才判不通过。
+# 判定方式：联系方式正则命中后，检查其前后 _CONTACT_WINDOW 字符内
+# 是否出现任一竞品名（含 token 缩写，如「科洛百KLB」的 KLB）。
+_CONTACT_WINDOW = 60
+# 联系方式模式：(类型标签, 正则)。数字类加前后环视防匹配到长串数字片段。
+_CONTACT_PATTERNS = [
+    ("手机号", re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")),
+    ("400电话", re.compile(r"(?<!\d)400-?\d{3,4}-?\d{3,4}(?!\d)")),
+    ("座机", re.compile(r"(?<!\d)0\d{2,3}-\d{7,8}(?!\d)")),
+    ("邮箱", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")),
+    ("网址", re.compile(r"(?i)(?:https?://|www\.)[A-Za-z0-9\u4e00-\u9fff.-]+\.[A-Za-z]{2,}\S*")),
+    ("微信号", re.compile(r"(?i)(?:微信|weixin|wx|vx|威信)\s*(?:号|id)?\s*[:：]?\s*"
+                          r"[A-Za-z0-9_-]{4,20}")),
+    ("QQ号", re.compile(r"(?i)(?:qq|扣扣)\s*号?\s*[:：]?\s*\d{5,11}")),
+]
+
+
+def _find_all(text_lower, name_lower):
+    """name 在 text（已小写）中的所有出现位置，返回 [(start, end), ...]"""
+    out, start = [], 0
+    while True:
+        i = text_lower.find(name_lower, start)
+        if i < 0:
+            return out
+        out.append((i, i + len(name_lower)))
+        start = i + 1
+
+
+def _brand_spans(text, names):
+    """品牌名列表在文中的所有出现区间（整词 + token 缩写，小写匹配）。
+
+    返回 [(start, end, 品牌名), ...]，供规则八/九做近邻判定与原因展示。"""
+    t = (text or "").lower()
+    spans = []
+    for b in names or []:
+        b = (b or "").strip()
+        if not b:
+            continue
+        bl = b.lower()
+        for s, e in _find_all(t, bl):
+            spans.append((s, e, b))
+        for tok in keyword_tokens(bl):
+            tl = tok.lower()
+            if tl != bl and len(tl) >= 2:
+                for s, e in _find_all(t, tl):
+                    spans.append((s, e, b))
+    return spans
+
+
+def _span_gap(s1, e1, s2, e2):
+    """两个区间之间的字符距离（相交为 0）"""
+    if e1 <= s2:
+        return s2 - e1
+    if e2 <= s1:
+        return s1 - e2
+    return 0
+
+
+def rule8_contact_check(text, competitors):
+    """规则八判定，返回 (通过?, 原因)。
+
+    联系方式（手机/400/座机/邮箱/网址/微信/QQ）出现在任一竞品名前后
+    _CONTACT_WINDOW 字符窗口内 → 判定该联系方式属于竞品，不通过；
+    我方自己的联系方式不受影响（无竞品在近邻窗口内）。原因里报距离最近的竞品。"""
+    t = text or ""
+    if not t or not competitors:
+        return True, None
+    spans = _brand_spans(t, competitors)
+    if not spans:
+        return True, None
+    hits = []
+    for label, rx in _CONTACT_PATTERNS:
+        for m in rx.finditer(t):
+            s, e = m.start(), m.end()
+            near, near_gap = None, None
+            for cs, ce, cname in spans:
+                g = _span_gap(s, e, cs, ce)
+                if g <= _CONTACT_WINDOW and (near_gap is None or g < near_gap):
+                    near, near_gap = cname, g
+            if near is not None:
+                item = "「%s」附近出现%s %s" % (near, label, m.group(0)[:30])
+                if item not in hits:
+                    hits.append(item)
+    if hits:
+        shown = "；".join(hits[:3])
+        if len(hits) > 3:
+            shown += " 等共%d处" % len(hits)
+        return False, "规则八：文章中出现竞品的联系方式（%s）" % shown
+    return True, None
+
+
+# ---------------- 规则九 · 品牌负面描述（本地快速路径） ----------------
+# 口径（2026-09-15 用户需求）：文章不能出现品牌（我方）和竞品的负面描述。
+# 本地为快速路径：强负面词（wordbooks/negative_terms.yaml）出现在品牌名
+# 前后 _NEG_WINDOW 字符内 → 直接判不通过（不依赖 LLM，LLM 故障也能兜底）。
+# 未命中本地词库时由 LLM 语义判定（fsaudit/negativity.py）识别隐性负面描述。
+_NEG_WINDOW = 40
+
+
+def load_negative_terms():
+    """加载品牌负面描述快速词库（negative_terms.yaml 的 terms 段）"""
+    return _read_yaml("negative_terms.yaml", "terms")
+
+
+def rule9_local_hits(text, keywords, competitors, neg_terms):
+    """规则九本地快速路径：返回 [(品牌名, 负面词), ...]。
+
+    强负面词出现在我方关键词或任一竞品名前后 _NEG_WINDOW 字符内即命中。"""
+    t = text or ""
+    if not t or not neg_terms:
+        return []
+    names = list(keywords or []) + list(competitors or [])
+    spans = _brand_spans(t, names)
+    if not spans:
+        return []
+    tl = t.lower()
+    out = []
+    for w in neg_terms:
+        wl = w.lower()
+        start = 0
+        while True:
+            i = tl.find(wl, start)
+            if i < 0:
+                break
+            start = i + 1
+            we = i + len(wl)
+            near, near_gap = None, None
+            for bs, be, bname in spans:
+                g = _span_gap(i, we, bs, be)
+                if g <= _NEG_WINDOW and (near_gap is None or g < near_gap):
+                    near, near_gap = bname, g
+            if near is not None:
+                item = (near, w)
+                if item not in out:
+                    out.append(item)
+    return out
+
+
 def rule3_check(text, keywords, competitors):
     """返回 (通过?, 原因)。
     我方关键词支持缩写/token 匹配：如关键词「科洛百KLB」，
@@ -410,14 +552,17 @@ def rule3_check(text, keywords, competitors):
 
 
 def audit_text(text, keywords, ai_terms, forbidden_words, competitors,
-               rules_enabled=None, absolute=None):
-    """执行确定性审核规则（规则一/二/三/六/七），返回 {"passed": bool, "reasons": [str]}
-    rules_enabled: dict，键为 r1/r2/r3/r6/r7；缺省视为全开。
+               rules_enabled=None, absolute=None, negative_terms=None):
+    """执行确定性审核规则（规则一/二/三/六/七/八/九本地路径），返回 {"passed": bool, "reasons": [str]}
+    rules_enabled: dict，键为 r1/r2/r3/r6/r7/r8/r9；缺省视为全开。
     absolute: (terms, patterns) 元组，规则六的绝对化用语词库；None 时跳过规则六。
+    negative_terms: 规则九本地快速词库（强负面词）；None 时跳过规则九本地路径
+                    （LLM 语义判定由 engine 另行调用 negativity 模块）。
     规则四/五（LLM 判定）由 engine 另行调用并按 r4/r5 开关决定是否触发。"""
-    enabled = {"r1": True, "r2": True, "r3": True, "r6": True, "r7": True}
+    enabled = {"r1": True, "r2": True, "r3": True, "r6": True, "r7": True,
+               "r8": True, "r9": True}
     if rules_enabled:
-        for k in ("r1", "r2", "r3", "r6", "r7"):
+        for k in ("r1", "r2", "r3", "r6", "r7", "r8", "r9"):
             if k in rules_enabled:
                 enabled[k] = bool(rules_enabled[k])
     reasons = []
@@ -448,6 +593,17 @@ def audit_text(text, keywords, ai_terms, forbidden_words, competitors,
         ok7, why7 = rule7_faq_check(text)
         if not ok7:
             reasons.append(why7)
+    if enabled["r8"]:
+        ok8, why8 = rule8_contact_check(text, competitors)
+        if not ok8:
+            reasons.append(why8)
+    if enabled["r9"] and negative_terms:
+        r9 = rule9_local_hits(text, keywords, competitors, negative_terms)
+        if r9:
+            shown = "；".join("「%s」附近出现负面词「%s」" % (b, w) for b, w in r9[:3])
+            if len(r9) > 3:
+                shown += " 等共%d处" % len(r9)
+            reasons.append("规则九：出现品牌/竞品负面描述（%s）" % shown)
     return {"passed": not reasons, "reasons": reasons}
 
 

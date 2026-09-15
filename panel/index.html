@@ -588,6 +588,20 @@
           </div>
           <label class="switch"><input type="checkbox" id="ruleR7"><span class="slider"></span></label>
         </div>
+        <div class="switch-row" data-rule="r8">
+          <div class="tx">
+            <b>规则八·竞品联系方式</b>
+            <div class="muted">手机/400/座机/邮箱/网址/微信/QQ 出现在竞品名附近（±60字）即不通过；我方自己的联系方式不受影响</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="ruleR8"><span class="slider"></span></label>
+        </div>
+        <div class="switch-row" data-rule="r9">
+          <div class="tx">
+            <b>规则九·品牌负面描述（本地+LLM）</b>
+            <div class="muted">我方与竞品均不得出现负面描述（贬损/差评/丑闻/避雷/劝退）；强负面词本地秒判，隐性负面走 LLM 语义判定</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="ruleR9"><span class="slider"></span></label>
+        </div>
         <div class="field" style="margin-top:12px">
           <div class="f-label"><svg><use href="#i-sliders"/></svg>违禁词列表（规则二 · 逗号分隔）</div>
           <input class="inp" id="colForbidden" autocomplete="off" spellcheck="false"
@@ -716,7 +730,7 @@ const $ = id => document.getElementById(id);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
 
 /* ---------------- 全局状态 ---------------- */
-let st = {bot:{running:false,managed:false}, config:{llm:{},columns:{},forbidden_words:[],rules_enabled:{r1:true,r2:true,r3:true,r4:true,r5:true}}};
+let st = {bot:{running:false,managed:false}, config:{llm:{},columns:{},forbidden_words:[],rules_enabled:{r1:true,r2:true,r3:true,r4:true,r5:true,r6:true,r7:true,r8:true,r9:true}}};
 let logSrc = "runtime", logTimer = null, followLog = true, dirtyCount = 0;
 let lastLogLines = "";
 
@@ -840,7 +854,7 @@ function renderConfig(){
   $("kvModel").style.color = deep? "var(--txt)":"var(--sub)";
   $("kvCols").textContent = (cols.keyword||"—")+" / "+(cols.link||"—")+" / "+(cols.result||"—");
 
-  // 五条规则启停渲染（统一由 rules_enabled 字典驱动）
+  // 九条规则启停渲染（统一由 rules_enabled 字典驱动）
   const re = c.rules_enabled || {};
   const setRule = (id, on) => { const el = $(id); if (el) el.checked = !!on; };
   setRule("ruleR1", re.r1 !== false);
@@ -850,6 +864,8 @@ function renderConfig(){
   setRule("ruleR5", re.r5 !== false);
   setRule("ruleR6", re.r6 !== false);
   setRule("ruleR7", re.r7 !== false);
+  setRule("ruleR8", re.r8 !== false);
+  setRule("ruleR9", re.r9 !== false);
   // 并发审核数：仅在服务端配置值变化时才覆盖下拉框（不打断用户未保存的选择）
   const concEl = $("llmConc");
   if (concEl){
@@ -859,12 +875,12 @@ function renderConfig(){
       lastConcShown = nConc;
     }
   }
-  const llmOn = !!re.r5 || !!re.r4;
+  const llmOn = !!re.r5 || !!re.r4 || !!re.r9;
   const rulesHint = $("rulesHint");
   if (rulesHint){
     rulesHint.textContent = llmOn && !deep
       ? "已开启 LLM 类规则但当前未配置 API Key，对应规则不会启用；保存 Key 后自动生效"
-      : "· 规则一/二/三为本地确定性（零费用）· 规则四/五调用 LLM（消耗 token）";
+      : "· 规则一/二/三/六/七/八为本地确定性（零费用）· 规则四/五/九调用 LLM（消耗 token）";
   }
 
   // 机器人应用凭证渲染
@@ -1087,7 +1103,7 @@ function collect(){
     const el = $("col"+k); if(el.value.trim()) cols[k.toLowerCase()] = el.value.trim(); });
   if(Object.keys(cols).length) c.columns = cols;
   if($("colForbidden").value.trim()) c.forbidden_words = $("colForbidden").value.trim();
-  // 七条规则启停开关
+  // 九条规则启停开关
   c.rules_enabled = {
     r1: $("ruleR1").checked,
     r2: $("ruleR2").checked,
@@ -1096,6 +1112,8 @@ function collect(){
     r5: $("ruleR5").checked,
     r6: $("ruleR6").checked,
     r7: $("ruleR7").checked,
+    r8: $("ruleR8").checked,
+    r9: $("ruleR9").checked,
   };
   // 并发审核数（仅在与当前配置不同才提交）
   const concEl = $("llmConc");

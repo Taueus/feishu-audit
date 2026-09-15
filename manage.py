@@ -294,10 +294,13 @@ def update_config(payload):
                             "r3": "规则三·关键词位置", "r4": "规则四·观点级主角性",
                             "r5": "规则五·AI人味&收录友好度",
                             "r6": "规则六·广告法绝对化用语",
-                            "r7": "规则七·FAQ问答结构"}.get(k, k)
+                            "r7": "规则七·FAQ问答结构",
+                            "r8": "规则八·竞品联系方式",
+                            "r9": "规则九·品牌负面描述"}.get(k, k)
                     notes.append("%s：%s" % (name, "启用" if v else "停用"))
         # 开启 LLM 类规则却未配 key 时给出提醒
-        if (cfg.rules_enabled.get("r4") or cfg.rules_enabled.get("r5")) and not cfg.llm.api_key:
+        if (cfg.rules_enabled.get("r4") or cfg.rules_enabled.get("r5")
+                or cfg.rules_enabled.get("r9")) and not cfg.llm.api_key:
             notes.append("⚠ 已开启 LLM 类规则但当前未配置 API Key，对应规则不会生效")
 
     # 6) 并发审核数（1-16；数据量大时调高可提速，过高可能触发 LLM 限流）
