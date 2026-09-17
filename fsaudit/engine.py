@@ -31,12 +31,17 @@ from .config import AppConfig, load_config, DOC_EXTS
 from .feishu import Feishu, FeishuError
 from .docparse import parse_doc, DocParseError
 from .llm import BrandIdentifier
+from .combined import CombinedAuditor
 from .rules import (load_ai_terms, load_brands, load_my_products,
                     load_absolute_terms, load_negative_terms, split_keywords,
                     col_letter, audit_text, is_mine, is_own_product, find_keyword)
-from .viewpoint import ViewpointAuditor, format_issues
-from .ai_quality import AIQualityAuditor, format_hard_reasons, format_suggestions
-from .negativity import NegativityAuditor, format_negatives
+from .viewpoint import (ViewpointAuditor, format_issues,
+                        judge as viewpoint_judge)
+from .ai_quality import (AIQualityAuditor, format_hard_reasons, format_suggestions,
+                         _judge_hard as ai_judge_hard,
+                         _suggestions as ai_suggestions)
+from .negativity import (NegativityAuditor, format_negatives,
+                         judge as negativity_judge)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
@@ -106,6 +111,7 @@ class AuditEngine(object):
         os.makedirs(self.cache_dir, exist_ok=True)
         self.fs = Feishu(self.cfg.app_id, self.cfg.app_secret)
         self.identifier = BrandIdentifier(self.cfg.llm, cache_dir=self.cache_dir)
+        self.combined = CombinedAuditor(self.cfg.llm, cache_dir=self.cache_dir)
         self.viewpoint = ViewpointAuditor(self.cfg.llm, cache_dir=self.cache_dir)
         self.ai_quality = AIQualityAuditor(self.cfg.llm, cache_dir=self.cache_dir)
         self.negativity = NegativityAuditor(self.cfg.llm, cache_dir=self.cache_dir)
@@ -242,79 +248,153 @@ class AuditEngine(object):
 
                 text = (title + "\n" + content).strip() if title else content
 
-                # 竞品识别：LLM + 本地词库
-                try:
-                    brands = self.identifier.identify(text)
-                except Exception as e:
-                    self.log.warning("LLM 识别失败（%s），退化为词库模式", e)
-                    brands = []
-                lex = [b for b in brands_lex if b.lower() in text.lower()]
-                all_brands = list(dict.fromkeys(brands + lex))
-                # 竞品 = 识别出的实体里去掉我方（与关键词相关）和自有产品白名单
-                competitors = [b for b in all_brands
-                               if not is_mine(b, keywords)
-                               and not is_own_product(b, my_products)]
-
-                res = audit_text(text, keywords, ai_terms, cfg.forbidden_words,
-                                 competitors, cfg.rules_enabled, absolute,
-                                 negative_terms)
-                reasons = list(res["reasons"])
-                # 规则四 · 观点级主角性（LLM）：仅当前三条确定性规则通过、
-                # 我方关键词确在文中出现、识别到竞品、且规则四开关打开时调用
                 r4_on = cfg.rules_enabled.get("r4", True)
-                if (not reasons and competitors and r4_on
-                        and self.viewpoint.available()
-                        and any((k or "").strip() and find_keyword(text, k) >= 0
-                                for k in keywords)):
+                r5_on = cfg.rules_enabled.get("r5", True)
+                r9_on = cfg.rules_enabled.get("r9", True)
+                kw_present = any((k or "").strip() and find_keyword(text, k) >= 0
+                                 for k in keywords)
+
+                # ------- LLM 判定：合并调用（默认，每篇 1 次请求） -------
+                # 品牌识别 + 规则四/五/九 的抽取任务一次请求完成；
+                # 判罚仍由各规则确定性 judge() 固化执行，口径与分模块时一致。
+                use_combined = (getattr(cfg, "llm_combined", True)
+                                and self.combined.available())
+                combined = None
+                if use_combined:
+                    want = {"brands": True,
+                            "r4": r4_on and kw_present,
+                            "r5": r5_on and kw_present,
+                            "r9": r9_on}
                     try:
-                        vp = self.viewpoint.audit(text, keywords, competitors)
-                        if vp.get("issues"):
-                            txt4 = format_issues(vp["issues"])
+                        combined = self.combined.audit(text, keywords, want=want)
+                    except Exception as e:
+                        self.log.warning(
+                            "合并 LLM 调用失败（行%d），本行降级为本地规则：%s",
+                            row_no, e)
+                        combined = None
+
+                if combined is not None:
+                    # ---- 合并链路：一次调用的抽取结果 + 确定性判罚 ----
+                    brands = combined.get("brands") or []
+                    lex = [b for b in brands_lex if b.lower() in text.lower()]
+                    all_brands = list(dict.fromkeys(brands + lex))
+                    competitors = [b for b in all_brands
+                                   if not is_mine(b, keywords)
+                                   and not is_own_product(b, my_products)]
+
+                    res = audit_text(text, keywords, ai_terms,
+                                     cfg.forbidden_words, competitors,
+                                     cfg.rules_enabled, absolute, negative_terms)
+                    reasons = list(res["reasons"])
+                    # 规则四：LLM 已抽好观点块，本地固化判罚
+                    if not reasons and competitors and r4_on and kw_present:
+                        issues = viewpoint_judge(combined.get("blocks") or [],
+                                                 keywords)
+                        if issues:
+                            txt4 = format_issues(issues)
                             if txt4:
                                 reasons.append("规则四：观点级主角性——%s" % txt4)
-                    except Exception as e:
-                        self.log.warning("规则四 LLM 判定失败（行%d），本规则跳过：%s",
-                                         row_no, e)
-                # 规则五 · AI 人味 & AI 收录友好度（LLM + 本地启发式）：
-                # 总开关由 cfg.rules_enabled["r5"] 控制；未配置 Key 时静默跳过。
-                # 仅在我方关键词确在文中出现时判定（无关键词则无可抽取断言可言）。
-                r5_on = cfg.rules_enabled.get("r5", True)
-                if (r5_on and self.ai_quality.available()
-                        and any((k or "").strip() and find_keyword(text, k) >= 0
-                                for k in keywords)):
-                    try:
-                        aq = self.ai_quality.audit(text, keywords)
-                        # 硬性一票否决：理由前置到 reasons 头部，让作者先看硬伤
-                        if aq.get("hard_reasons"):
-                            hard_txt = format_hard_reasons(aq["hard_reasons"])
+                    # 规则五：硬性一票否决（前置）+ 本地建议启发式
+                    if r5_on and kw_present:
+                        aq = combined.get("ai_quality") or {}
+                        hard_fail, hard_reasons = ai_judge_hard(aq)
+                        if hard_reasons:
+                            hard_txt = format_hard_reasons(hard_reasons)
                             reasons.insert(0, "规则五：%s" % hard_txt)
-                        # 收录建议：仅在原因为空（仍为通过）时附加，避免与硬性混排
-                        elif aq.get("suggestions"):
-                            sug_txt = format_suggestions(aq["suggestions"])
-                            if sug_txt:
-                                reasons.append("规则五·收录优化建议——%s" % sug_txt)
-                    except Exception as e:
-                        self.log.warning("规则五 LLM 判定失败（行%d），本规则跳过：%s",
-                                         row_no, e)
-                # 规则九 · 品牌负面描述（本地快速路径 + LLM 语义判定）：
-                # 本地强负面词已在 audit_text 内判罚（命中即有 reasons）；
-                # 这里仅在本地未命中、且文中出现我方关键词或竞品时做 LLM 语义判定
-                # （识别隐性负面描述，如「用了三天就坏了」）。
-                r9_on = cfg.rules_enabled.get("r9", True)
-                brand_present = (competitors or
-                                 any((k or "").strip() and find_keyword(text, k) >= 0
-                                     for k in keywords))
-                if (r9_on and not reasons and brand_present
-                        and self.negativity.available()):
-                    try:
-                        neg = self.negativity.audit(text, keywords, competitors)
-                        if neg.get("issues"):
-                            neg_txt = format_negatives(neg["issues"])
+                        else:
+                            suggestions = ai_suggestions(
+                                text, aq.get("mine_quote") or "",
+                                bool(aq.get("ai_tone_heavy")))
+                            if suggestions:
+                                sug_txt = format_suggestions(suggestions)
+                                if sug_txt:
+                                    reasons.append("规则五·收录优化建议——%s" % sug_txt)
+                    # 规则九：隐性负面描述判罚（本地强负面词已在 audit_text 内）
+                    brand_present = bool(competitors or kw_present)
+                    if r9_on and not reasons and brand_present:
+                        issues = negativity_judge(combined.get("negatives") or [],
+                                                  keywords, competitors)
+                        if issues:
+                            neg_txt = format_negatives(issues)
                             if neg_txt:
                                 reasons.append("规则九：%s" % neg_txt)
+                elif use_combined:
+                    # ---- 合并调用失败的降级：本地词库模式，LLM 规则跳过 ----
+                    # 不回退到分模块补发（故障时避免单行放大为 4 次调用）
+                    lex = [b for b in brands_lex if b.lower() in text.lower()]
+                    competitors = [b for b in lex
+                                   if not is_mine(b, keywords)
+                                   and not is_own_product(b, my_products)]
+                    res = audit_text(text, keywords, ai_terms,
+                                     cfg.forbidden_words, competitors,
+                                     cfg.rules_enabled, absolute, negative_terms)
+                    reasons = list(res["reasons"])
+                else:
+                    # ---- 旧分模块链路（llm_combined: false 时） ----
+                    # 竞品识别：LLM + 本地词库
+                    try:
+                        brands = self.identifier.identify(text)
                     except Exception as e:
-                        self.log.warning("规则九 LLM 判定失败（行%d），本规则跳过：%s",
-                                         row_no, e)
+                        self.log.warning("LLM 识别失败（%s），退化为词库模式", e)
+                        brands = []
+                    lex = [b for b in brands_lex if b.lower() in text.lower()]
+                    all_brands = list(dict.fromkeys(brands + lex))
+                    # 竞品 = 识别出的实体里去掉我方（与关键词相关）和自有产品白名单
+                    competitors = [b for b in all_brands
+                                   if not is_mine(b, keywords)
+                                   and not is_own_product(b, my_products)]
+
+                    res = audit_text(text, keywords, ai_terms, cfg.forbidden_words,
+                                     competitors, cfg.rules_enabled, absolute,
+                                     negative_terms)
+                    reasons = list(res["reasons"])
+                    # 规则四 · 观点级主角性（LLM）：仅当前三条确定性规则通过、
+                    # 我方关键词确在文中出现、识别到竞品、且规则四开关打开时调用
+                    if (not reasons and competitors and r4_on
+                            and self.viewpoint.available() and kw_present):
+                        try:
+                            vp = self.viewpoint.audit(text, keywords, competitors)
+                            if vp.get("issues"):
+                                txt4 = format_issues(vp["issues"])
+                                if txt4:
+                                    reasons.append("规则四：观点级主角性——%s" % txt4)
+                        except Exception as e:
+                            self.log.warning("规则四 LLM 判定失败（行%d），本规则跳过：%s",
+                                             row_no, e)
+                    # 规则五 · AI 人味 & AI 收录友好度（LLM + 本地启发式）：
+                    # 总开关由 cfg.rules_enabled["r5"] 控制；未配置 Key 时静默跳过。
+                    # 仅在我方关键词确在文中出现时判定（无关键词则无可抽取断言可言）。
+                    if (r5_on and self.ai_quality.available() and kw_present):
+                        try:
+                            aq = self.ai_quality.audit(text, keywords)
+                            # 硬性一票否决：理由前置到 reasons 头部，让作者先看硬伤
+                            if aq.get("hard_reasons"):
+                                hard_txt = format_hard_reasons(aq["hard_reasons"])
+                                reasons.insert(0, "规则五：%s" % hard_txt)
+                            # 收录建议：仅在原因为空（仍为通过）时附加，避免与硬性混排
+                            elif aq.get("suggestions"):
+                                sug_txt = format_suggestions(aq["suggestions"])
+                                if sug_txt:
+                                    reasons.append("规则五·收录优化建议——%s" % sug_txt)
+                        except Exception as e:
+                            self.log.warning("规则五 LLM 判定失败（行%d），本规则跳过：%s",
+                                             row_no, e)
+                    # 规则九 · 品牌负面描述（本地快速路径 + LLM 语义判定）：
+                    # 本地强负面词已在 audit_text 内判罚（命中即有 reasons）；
+                    # 这里仅在本地未命中、且文中出现我方关键词或竞品时做 LLM 语义判定
+                    # （识别隐性负面描述，如「用了三天就坏了」）。
+                    brand_present = (competitors or kw_present)
+                    if (r9_on and not reasons and brand_present
+                            and self.negativity.available()):
+                        try:
+                            neg = self.negativity.audit(text, keywords, competitors)
+                            if neg.get("issues"):
+                                neg_txt = format_negatives(neg["issues"])
+                                if neg_txt:
+                                    reasons.append("规则九：%s" % neg_txt)
+                        except Exception as e:
+                            self.log.warning("规则九 LLM 判定失败（行%d），本规则跳过：%s",
+                                             row_no, e)
                 passed = not reasons
                 reason = "；".join(reasons)
                 result_text = "通过" if passed else "不通过"

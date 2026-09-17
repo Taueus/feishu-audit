@@ -68,6 +68,9 @@ class AppConfig(object):
         self.rules_enabled = dict(DEFAULT_RULES_ENABLED)
         # 行级并发数：多行文档并行处理（下载+LLM），1=串行（旧行为）
         self.concurrency = DEFAULT_CONCURRENCY
+        # LLM 合并调用：True（默认）= 品牌识别+规则四/五/九 一次请求完成（fsaudit/combined.py，
+        # 每篇 4 次调用降为 1 次）；False = 退回旧的分模块独立调用链路。
+        self.llm_combined = True
         # 常驻「审核工作台」卡片的推送目标会话 chat_id（机器人与用户的单聊）。
         # 留空则不主动推送工作台卡（避免向已失效会话空转重试）。
         self.workbench_chat_id = ""
@@ -127,6 +130,8 @@ def load_config(path=None):
     except (TypeError, ValueError):
         cfg.concurrency = DEFAULT_CONCURRENCY
     cfg.concurrency = max(1, min(cfg.concurrency, MAX_CONCURRENCY))
+    # LLM 合并调用开关：默认 True；显式 false 才回退旧分模块链路
+    cfg.llm_combined = bool(raw.get("llm_combined", True))
     return cfg
 
 
@@ -143,6 +148,7 @@ def save_config(cfg, path=None):
         "forbidden_words": cfg.forbidden_words,
         "rules_enabled": cfg.rules_enabled,
         "concurrency": cfg.concurrency,
+        "llm_combined": cfg.llm_combined,
     }
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
