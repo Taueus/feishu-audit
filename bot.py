@@ -38,14 +38,17 @@ from fsaudit.engine import AuditEngine
 PROGRESS_INTERVAL = 2.5      # 审核中卡片刷新间隔（秒）
 MAX_RESULT_ROWS = 30         # 结果卡片最多列出的文档数
 SHEETS_CACHE_TTL = 60        # 工作表列表缓存秒数
-# 机器人启动时主动推送「审核工作台」卡片的单聊会话（你与机器人的 p2p chat_id）
-WORKBENCH_CHAT_ID = "oc_e7f67309de0261d6d0a581b277c7d0d0"
 # 已推送的工作台卡片 message_id 持久化文件（重启去重用：重启=原位刷新旧卡，不重复推送）
 WORKBENCH_STATE_FILE = os.path.join(BASE_DIR, "workbench_state.json")
 
 cfg = load_config()
 engine = AuditEngine(cfg)
 channel = FeishuChannel(app_id=cfg.app_id, app_secret=cfg.app_secret)
+
+# 机器人启动时主动推送「审核工作台」卡片的单聊会话（你与机器人的 p2p chat_id）。
+# 从 config.yaml 的 workbench_chat_id 读取；留空则跳过推送，
+# 避免向已失效（机器人已被移出）的会话空转重试 60 秒。
+WORKBENCH_CHAT_ID = (getattr(cfg, "workbench_chat_id", "") or "").strip()
 
 HELP_TEXT = (
     "🤖 审核机器人用法\n"
@@ -512,6 +515,9 @@ def send_workbench_sync():
     机器人重启时先尝试原位刷新旧卡（不重复堆卡）；
     旧卡已不存在/刷新失败时才新推一张，并更新本地记录。
     """
+    if not WORKBENCH_CHAT_ID:
+        print("[workbench] 未配置 workbench_chat_id，跳过工作台卡推送", flush=True)
+        return
     card = picker_card(get_sheets(force=True), workbench=True)
     deadline = time.time() + 60
     while True:
@@ -543,12 +549,32 @@ def send_workbench_sync():
                 return
             raise RuntimeError(res.error or "send failed")
         except Exception as e:
+            msg = str(e)
+            # 不可重试类错误（会话不存在 / 机器人已被移出该会话 / 非消息发送者）
+            # 直接放弃，避免每次启动都空转重试 60 秒并刷大量重复日志。
+            if ("retryable=False" in msg or "230002" in msg
+                    or "TARGET_REVOKED" in msg or "230001" in msg):
+                print("[workbench] 推送失败(不可重试，已放弃): %s → %s"
+                      % (WORKBENCH_CHAT_ID, e), flush=True)
+                return
             if time.time() > deadline:
                 print("[workbench] 推送失败(60s 超时): %s" % e, flush=True)
                 return
             print("[workbench] 发送重试中: %s" % e, flush=True)
             time.sleep(2)
     print("[workbench] 推送失败(60s 超时)", flush=True)
+
+
+def _workbench_thread():
+    """工作台卡推送线程入口。
+
+    单独包一层异常保护：get_sheets / 推送过程中的任何异常都不该让
+    daemon 线程裸崩（裸崩会把整页堆栈打到运行日志，且后续无任何补救）。
+    """
+    try:
+        send_workbench_sync()
+    except Exception as e:
+        print("[workbench] 工作台卡推送异常（已忽略）: %s" % e, flush=True)
 
 
 def main():
@@ -560,7 +586,7 @@ def main():
     print("=" * 50)
     channel.on("message", on_message)
     channel.on("cardAction", on_card)
-    threading.Thread(target=send_workbench_sync, daemon=True).start()
+    threading.Thread(target=_workbench_thread, daemon=True).start()
     try:
         channel.start()
     except KeyboardInterrupt:

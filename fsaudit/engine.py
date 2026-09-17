@@ -42,12 +42,58 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
 
 
+class _DailyFileHandler(logging.Handler):
+    """按天滚动的审计日志文件 handler。
+
+    审计日志文件名含日期（audit_YYYYMMDD.log）。原先在引擎初始化时一次性
+    构造 FileHandler，导致 bot 长期运行不重启时，跨天后仍继续写「启动那天」
+    的文件——面板「审核日志」页按当天日期取文件就读不到内容。
+    这里在每次 emit 前检查日期，跨天自动切换到新文件。
+    """
+
+    def __init__(self, base_dir, prefix="audit_"):
+        logging.Handler.__init__(self)
+        self.base_dir = base_dir
+        self.prefix = prefix
+        self._day = None
+        self._fh = None
+        self.setFormatter(logging.Formatter("%(message)s"))
+
+    def _rollover_if_needed(self):
+        day = date.today().strftime("%Y%m%d")
+        if self._fh is not None and day == self._day:
+            return
+        if self._fh is not None:
+            try:
+                self._fh.close()
+            except Exception:
+                pass
+        path = os.path.join(self.base_dir, "%s%s.log" % (self.prefix, day))
+        self._fh = open(path, "a", encoding="utf-8")
+        self._day = day
+
+    def emit(self, record):
+        try:
+            self._rollover_if_needed()
+            self._fh.write(self.format(record) + "\n")
+            self._fh.flush()
+        except Exception:
+            self.handleError(record)
+
+    def close(self):
+        try:
+            if self._fh is not None:
+                self._fh.close()
+        finally:
+            self._fh = None
+            logging.Handler.close(self)
+
+
 def setup_file_logging():
-    log_file = os.path.join(BASE_DIR, "audit_%s.log" % date.today().strftime("%Y%m%d"))
     logger = logging.getLogger("audit")
     if not logger.handlers:
         logger.setLevel(logging.INFO)
-        logger.addHandler(logging.FileHandler(log_file, encoding="utf-8"))
+        logger.addHandler(_DailyFileHandler(BASE_DIR))
     return logger
 
 

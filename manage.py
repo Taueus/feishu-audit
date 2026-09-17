@@ -63,6 +63,8 @@ def _pid_alive(pid):
         r = subprocess.run(
             ["tasklist", "/FI", "PID eq %d" % pid, "/NH"],
             capture_output=True, text=True, timeout=8,
+            errors="replace",   # 中文 Windows 下 tasklist 输出含非 UTF-8 字节，
+                                # 不加会触发 UnicodeDecodeError 让 reader 线程裸崩
             creationflags=CREATE_NO_WINDOW,
         )
         return str(pid) in (r.stdout or "")

@@ -68,6 +68,9 @@ class AppConfig(object):
         self.rules_enabled = dict(DEFAULT_RULES_ENABLED)
         # 行级并发数：多行文档并行处理（下载+LLM），1=串行（旧行为）
         self.concurrency = DEFAULT_CONCURRENCY
+        # 常驻「审核工作台」卡片的推送目标会话 chat_id（机器人与用户的单聊）。
+        # 留空则不主动推送工作台卡（避免向已失效会话空转重试）。
+        self.workbench_chat_id = ""
 
 
 def parse_spreadsheet_token(s):
@@ -104,6 +107,7 @@ def load_config(path=None):
     cfg.app_secret = raw.get("app_secret", "")
     cfg.spreadsheet_token = raw.get("spreadsheet_token", "")
     cfg.folder_token = raw.get("folder_token", "")
+    cfg.workbench_chat_id = (raw.get("workbench_chat_id") or "").strip()
     cfg.llm = LLMConfig.from_dict(raw.get("llm") or {})
     cols = raw.get("columns") or {}
     for k in DEFAULT_COLUMNS:
@@ -133,6 +137,7 @@ def save_config(cfg, path=None):
         "app_secret": cfg.app_secret,
         "spreadsheet_token": cfg.spreadsheet_token,
         "folder_token": cfg.folder_token,
+        "workbench_chat_id": cfg.workbench_chat_id,
         "llm": cfg.llm.to_dict(),
         "columns": cfg.columns,
         "forbidden_words": cfg.forbidden_words,
