@@ -54,7 +54,9 @@
 
 LLM 增强（配置 `api_key` 后启用）：
 
-- **竞品识别**（`fsaudit/llm.py`）：向任意 OpenAI 兼容接口发原文，提取文中所有品牌实体（我方 + 竞品），只用于竞品识别；结果按正文哈希缓存在 `cache/brand_cache.json`，同一篇只调一次。未配置 Key = 纯词库模式，本地 `wordbooks/brands.yaml` 兜底。
+> **合并调用（降本）**：默认开启 `llm_combined: true`——品牌识别 + 规则四/五/九 的 LLM 抽取任务**合并为一次请求**完成（`fsaudit/combined.py`），每篇文档 4 次调用降为 1 次、全文只发送一遍，请求量与 tokens 预估降 70%。判罚仍由各规则的确定性 `judge()` 固化执行，口径与分模块时完全一致；结果按正文哈希缓存在 `cache/combined_cache.json`。合并调用失败时该行降级为本地词库模式（不回退分模块补发）；config.yaml 设 `llm_combined: false` 可回退旧的分模块链路。
+
+- **竞品识别**（`fsaudit/llm.py`）：向任意 OpenAI 兼容接口发原文，提取文中所有品牌实体（我方 + 竞品），只用于竞品识别；结果按正文哈希缓存在 `cache/brand_cache.json`，同一篇只调一次。未配置 Key = 纯词库模式，本地 `wordbooks/brands.yaml` 兜底。（合并调用开启时本模块仅在旧链路使用）
 - **规则四 · 观点级主角性**（`fsaudit/viewpoint.py`）：稿子允许竞品对比，但必须**突出我方**。审核**不做全文竞品/我方提及总量比对**（那会误伤多竞品但以我为主角的合规对比文），而是按「观点/小节/场景/价位档」逐块判定。
 
   架构为 **「LLM 抽取事实 + 确定性代码判罚」**：LLM 把正文切成观点块并只填客观属性（`kind` / `mine_present` / `comps_count` / `evidence`），是否违规由 `judge()` 按固化口径判罚——口径稳定、可复核、可留痕。现行判据（v8）**仅两条**，命中任一 → 不通过：
@@ -143,6 +145,7 @@ feishu-audit/
 │   ├── viewpoint.py        #   规则四 · 观点级主角性（LLM 抽块 + 代码判罚）
 │   ├── ai_quality.py       #   规则五 · AI 人味 & 收录友好度（LLM 硬性 + 本地建议）
 │   ├── negativity.py       #   规则九 · 品牌负面描述（LLM 抽取 + 代码判罚）
+│   ├── combined.py         #   合并 LLM 调用：品牌识别+规则四/五/九 一次请求（降本）
 │   ├── llm.py              #   LLM 品牌实体识别（OpenAI 兼容，本地缓存）
 │   ├── docparse.py         #   .doc/.docx 文本抽取
 │   ├── doc_convert.py      #   .doc→.docx 子进程转换（COM 卡死可超时熔断）
