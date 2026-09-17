@@ -34,3 +34,6 @@ _regress_*.json
 stats_probe2.py
 writeback_rule4b.py
 start_manage.bat
+
+# ===== 临时/调试残留（safe-delete 在沙箱内不可用，无法自动清理）=====
+_*
