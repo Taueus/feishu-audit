@@ -153,7 +153,9 @@ feishu-audit/
 │   ├── negative_terms.yaml #   规则九 品牌负面描述强负面词（本地快速路径）
 │   └── brands.yaml         #   本地竞品品牌词库 + 自有产品白名单
 ├── audit.py                # （可选）CLI 版审核入口：python audit.py --init 配置向导
-├── selftest.py             # （可选）配置自检脚本
+├── selftest.py             # （可选）审核规则自检脚本（规则一~九用例）
+├── panel_selftest.js       # （可选）面板前端回归测试：node panel_selftest.js
+│                           #   源码断言零依赖；DOM 集成测试需 jsdom，缺失自动跳过
 ├── requirements.txt        # Python 依赖
 ├── config.example.yaml     # 配置模板 → 复制为 config.yaml 后填写
 └── .gitignore              # 已排除 config.yaml / 日志 / cache 业务文档 等
@@ -236,9 +238,18 @@ cp config.example.yaml config.yaml    # Windows: copy config.example.yaml config
 ### 5. 自检
 
 ```bash
-python selftest.py          # 校验配置与凭证
+python selftest.py          # 审核规则用例自检（规则一~九正反例）
 # 或：面板首页点「测试连接」按钮 → 实际连一次飞书列出工作表
+
+node panel_selftest.js      # 面板前端回归测试（源码断言，零依赖）
+# DOM 集成测试需先装 jsdom：
+#   cd C:/Users/<you>/.workbuddy/binaries/node/workspace && npm i jsdom
+#   然后 NODE_PATH=<上述目录>/node_modules node panel_selftest.js
 ```
+
+> 面板前端改动后建议跑一次 `panel_selftest.js`。它覆盖的核心场景是
+> 「改规则开关后会连轮询 N 次仍保持用户改动」——防止 `renderConfig` 被改回
+> 无条件覆盖服务器值的写法，导致开关点了就弹回。
 
 ## 运行方式
 
