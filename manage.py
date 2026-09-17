@@ -29,6 +29,9 @@ sys.path.insert(0, BASE_DIR)
 from fsaudit.config import load_config, save_config, parse_spreadsheet_token, parse_folder_token  # noqa: E402
 
 PORT = int(os.environ.get("PANEL_PORT", "8788"))
+HOST = os.environ.get("PANEL_HOST", "127.0.0.1")    # 监听地址；上云部署时改为 0.0.0.0
+PANEL_USER = os.environ.get("PANEL_USER", "")        # Basic Auth 用户名；空=不强制
+PANEL_PASS = os.environ.get("PANEL_PASS", "")        # Basic Auth 密码；空=不强制
 PID_FILE = os.path.join(BASE_DIR, "bot.pid")
 RUNTIME_LOG = os.path.join(BASE_DIR, "bot_runtime.log")
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
@@ -59,16 +62,31 @@ def tail_file(path, n=120):
 def _pid_alive(pid):
     if not pid:
         return False
+    if os.name == "nt":
+        try:
+            r = subprocess.run(
+                ["tasklist", "/FI", "PID eq %d" % pid, "/NH"],
+                capture_output=True, text=True, timeout=8,
+                errors="replace",   # 中文 Windows 下 tasklist 输出含非 UTF-8 字节，
+                                    # 不加会触发 UnicodeDecodeError 让 reader 线程裸崩
+                creationflags=CREATE_NO_WINDOW,
+            )
+            return str(pid) in (r.stdout or "")
+        except Exception:
+            return False
+    # POSIX（Linux/macOS）：kill -0 检查 + /proc 兜底
     try:
-        r = subprocess.run(
-            ["tasklist", "/FI", "PID eq %d" % pid, "/NH"],
-            capture_output=True, text=True, timeout=8,
-            errors="replace",   # 中文 Windows 下 tasklist 输出含非 UTF-8 字节，
-                                # 不加会触发 UnicodeDecodeError 让 reader 线程裸崩
-            creationflags=CREATE_NO_WINDOW,
-        )
-        return str(pid) in (r.stdout or "")
-    except Exception:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True   # 进程存在，只是不归我们管
+    except OSError:
+        return False
+    try:
+        os.stat("/proc/%d" % pid)
+        return True
+    except OSError:
         return False
 
 
@@ -122,11 +140,13 @@ def bot_start():
                    .encode("utf-8"))
         logf.flush()
         try:
+            popen_kwargs = dict(stdout=logf, stderr=subprocess.STDOUT)
+            if os.name == "nt":
+                popen_kwargs["creationflags"] = CREATE_NO_WINDOW
             _proc = subprocess.Popen(
                 [sys.executable, "bot.py"],
                 cwd=BASE_DIR,
-                stdout=logf, stderr=subprocess.STDOUT,
-                creationflags=CREATE_NO_WINDOW,
+                **popen_kwargs,
             )
         except Exception as e:
             logf.close()
@@ -369,8 +389,36 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):   # 静默访问日志
         return
 
+    # ---- Basic Auth ----
+    def _check_auth(self):
+        # 没配用户名密码 = 不强制（开发场景默认 127.0.0.1 仍安全）
+        if not (PANEL_USER and PANEL_PASS):
+            return True
+        import base64
+        auth = self.headers.get("Authorization", "")
+        if not auth.startswith("Basic "):
+            return False
+        try:
+            up = base64.b64decode(auth[6:]).decode("utf-8", errors="replace")
+            u, _, p = up.partition(":")
+            return u == PANEL_USER and p == PANEL_PASS
+        except Exception:
+            return False
+
+    def _require_auth(self):
+        if self._check_auth():
+            return True
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="FeishuAuditPanel"')
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b"401 Unauthorized")
+        return False
+
     # ---- 路由 ----
     def do_GET(self):
+        if not self._require_auth():
+            return
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html", "/panel"):
             self._serve_static()
@@ -401,6 +449,8 @@ class Handler(BaseHTTPRequestHandler):
             _send_json(self, 404, {"ok": False, "msg": "not found"})
 
     def do_POST(self):
+        if not self._require_auth():
+            return
         path = self.path.split("?", 1)[0]
         try:
             ln = int(self.headers.get("Content-Length") or 0)
@@ -453,8 +503,8 @@ def main():
         if os.environ.get("FEISHU_AUDIT_AUTOSTART_BOT", "0") == "1":
             r = bot_start()
             print("[panel] 开机自启 bot: %s" % r, flush=True)
-    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    print("[panel] 运维面板已启动:  http://127.0.0.1:%d" % PORT, flush=True)
+    srv = ThreadingHTTPServer((HOST, PORT), Handler)
+    print("[panel] 运维面板已启动:  http://%s:%d" % (HOST, PORT), flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
